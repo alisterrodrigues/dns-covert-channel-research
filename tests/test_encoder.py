@@ -1,0 +1,171 @@
+"""Tests for DNSExfilEncoder encode() and decode() methods."""
+
+import logging
+import os
+
+import pytest
+
+from exfil.encoder import DNSExfilEncoder, EncodeResult
+
+logger = logging.getLogger(__name__)
+
+# Domain used across tests — .invalid never resolves, safe for offline runs.
+_TEST_DOMAIN = "exfil.invalid"
+
+
+# ---------------------------------------------------------------------------
+# Basic encode behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_encode_returns_fqdns():
+    """Asserts encode(b'hello') returns a list of strings, last starting with 'done.'."""
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
+    result = encoder.encode(b"hello")
+    assert isinstance(result.fqdns, list)
+    assert all(isinstance(f, str) for f in result.fqdns)
+    assert result.fqdns[-1].startswith("done.")
+
+
+def test_encode_empty():
+    """Asserts encode(b'') returns EncodeResult with empty fqdns list and chunk_count=0."""
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
+    result = encoder.encode(b"")
+    assert isinstance(result, EncodeResult)
+    assert result.fqdns == []
+    assert result.chunk_count == 0
+
+
+def test_encode_includes_terminator():
+    """Asserts the last FQDN in a non-empty encode result is 'done.{target_domain}'."""
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
+    result = encoder.encode(b"any data")
+    assert result.fqdns[-1] == f"done.{_TEST_DOMAIN}"
+
+
+# ---------------------------------------------------------------------------
+# Label safety
+# ---------------------------------------------------------------------------
+
+
+def test_no_label_exceeds_63_chars():
+    """Asserts every label in every FQDN from 10-, 100-, and 1000-byte inputs is <= 63 chars."""
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
+    # DNS RFC 1035 hard limit per label is 63 characters.
+    dns_label_max = 63
+    for size in (10, 100, 1000):
+        data = os.urandom(size)
+        result = encoder.encode(data)
+        for fqdn in result.fqdns:
+            for label in fqdn.split("."):
+                assert len(label) <= dns_label_max, (
+                    f"Label '{label}' in '{fqdn}' is {len(label)} chars (max {dns_label_max})"
+                )
+
+
+def test_chunk_size_validation():
+    """Asserts DNSExfilEncoder raises ValueError when chunk_size=61 (exceeds max of 60)."""
+    with pytest.raises(ValueError):
+        # 61 exceeds _MAX_CHUNK_SIZE (63 - 3 = 60); must raise.
+        DNSExfilEncoder(target_domain=_TEST_DOMAIN, chunk_size=61)
+
+
+def test_chunk_size_minimum():
+    """Asserts DNSExfilEncoder raises ValueError when chunk_size=0 (below minimum of 1)."""
+    with pytest.raises(ValueError):
+        DNSExfilEncoder(target_domain=_TEST_DOMAIN, chunk_size=0)
+
+
+# ---------------------------------------------------------------------------
+# Sequence numbers
+# ---------------------------------------------------------------------------
+
+
+def test_sequence_numbers_present():
+    """Asserts every non-terminator FQDN label starts with a two-digit number followed by '_'."""
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
+    result = encoder.encode(b"hello world")
+    terminator = f"done.{_TEST_DOMAIN}"
+    for fqdn in result.fqdns:
+        if fqdn == terminator:
+            continue
+        label = fqdn.split(".")[0]
+        # Expected format: "NN_..." where NN is exactly two decimal digits.
+        assert len(label) >= 3, f"Label '{label}' too short to contain sequence prefix"
+        assert label[0].isdigit() and label[1].isdigit(), (
+            f"Label '{label}' does not start with two digits"
+        )
+        assert label[2] == "_", f"Label '{label}' missing '_' after sequence digits"
+
+
+def test_sequence_numbers_ordered():
+    """Asserts sequence numbers increase by 1 from 00 through N-1 with no gaps."""
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
+    result = encoder.encode(b"hello world")
+    terminator = f"done.{_TEST_DOMAIN}"
+    seq_nums = []
+    for fqdn in result.fqdns:
+        if fqdn == terminator:
+            continue
+        label = fqdn.split(".")[0]
+        seq = int(label[:2])
+        seq_nums.append(seq)
+    expected = list(range(len(seq_nums)))
+    assert seq_nums == expected, (
+        f"Sequence numbers {seq_nums} are not contiguous from 0"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_roundtrip_10_bytes():
+    """Asserts decode(encode(data).fqdns) == data for 10 random bytes."""
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
+    data = os.urandom(10)
+    assert encoder.decode(encoder.encode(data).fqdns) == data
+
+
+def test_roundtrip_100_bytes():
+    """Asserts decode(encode(data).fqdns) == data for 100 random bytes."""
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
+    data = os.urandom(100)
+    assert encoder.decode(encoder.encode(data).fqdns) == data
+
+
+def test_roundtrip_1000_bytes():
+    """Asserts decode(encode(data).fqdns) == data for 1000 random bytes."""
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
+    data = os.urandom(1000)
+    assert encoder.decode(encoder.encode(data).fqdns) == data
+
+
+def test_roundtrip_exact_text():
+    """Asserts encode then decode of b'secret exfil data' round-trips exactly."""
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
+    data = b"secret exfil data"
+    assert encoder.decode(encoder.encode(data).fqdns) == data
+
+
+# ---------------------------------------------------------------------------
+# Decode edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_decode_empty_list():
+    """Asserts decode([]) returns b''."""
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
+    assert encoder.decode([]) == b""
+
+
+def test_decode_strips_terminator():
+    """Asserts decode result is identical whether or not the terminator FQDN is included."""
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
+    data = b"strip terminator test"
+    result = encoder.encode(data)
+    fqdns_with_term = result.fqdns
+    # Build the list without the terminator for comparison.
+    fqdns_without_term = [f for f in fqdns_with_term if not f.startswith("done.")]
+    assert encoder.decode(fqdns_with_term) == encoder.decode(fqdns_without_term)
