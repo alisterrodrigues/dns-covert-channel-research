@@ -1,0 +1,43 @@
+{
+  "sessions": [
+    {
+      "session_name": "basic",
+      "pcap_path": "/home/karavense/dns-covert-channel-research/sample_data/exfil_session.pcap",
+      "queries_detected": 47,
+      "suspicious_domains": 1,
+      "top_domain": "exfil.invalid",
+      "top_confidence": "medium",
+      "top_avg_entropy": 3.1556498402942994,
+      "top_avg_label_length": 33,
+      "top_beacon_confidence": "high",
+      "detected": true,
+      "signals": [
+        "avg label length 33.0 > threshold 20",
+        "query volume 47 > threshold 20",
+        "beaconing detected: interval 0.53s, confidence high"
+      ]
+    },
+    {
+      "session_name": "evasion",
+      "pcap_path": "/home/karavense/dns-covert-channel-research/sample_data/evasion_session.pcap",
+      "queries_detected": 47,
+      "suspicious_domains": 1,
+      "top_domain": "exfil.invalid",
+      "top_confidence": "medium",
+      "top_avg_entropy": 3.1556498402942994,
+      "top_avg_label_length": 33,
+      "top_beacon_confidence": "high",
+      "detected": true,
+      "signals": [
+        "avg label length 33.0 > threshold 20",
+        "query volume 47 > threshold 20",
+        "beaconing detected: interval 0.53s, confidence high"
+      ]
+    }
+  ],
+  "thresholds": {
+    "high_entropy_threshold": 3.5,
+    "long_label_threshold": 20
+  },
+  "summary": "Basic exfil session: detected with medium confidence. Evasion variant: detected with medium confidence."
+}
