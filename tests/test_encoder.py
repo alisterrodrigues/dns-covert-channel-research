@@ -90,12 +90,12 @@ def test_sequence_numbers_present():
         if fqdn == terminator:
             continue
         label = fqdn.split(".")[0]
-        # Expected format: "NN_..." where NN is exactly two decimal digits.
-        assert len(label) >= 3, f"Label '{label}' too short to contain sequence prefix"
-        assert label[0].isdigit() and label[1].isdigit(), (
-            f"Label '{label}' does not start with two digits"
-        )
-        assert label[2] == "_", f"Label '{label}' missing '_' after sequence digits"
+        # Sequence prefix is "NN_" where NN is one or more digits (minimum 2).
+        # At seq >= 100 the prefix grows to 3+ digits — still valid format.
+        assert "_" in label, f"Label '{label}' missing '_' sequence separator"
+        prefix, _ = label.split("_", 1)
+        assert prefix.isdigit(), f"Sequence prefix '{prefix}' in label '{label}' is not numeric"
+        assert len(prefix) >= 2, f"Sequence prefix '{prefix}' shorter than minimum 2 digits"
 
 
 def test_sequence_numbers_ordered():
@@ -108,7 +108,8 @@ def test_sequence_numbers_ordered():
         if fqdn == terminator:
             continue
         label = fqdn.split(".")[0]
-        seq = int(label[:2])
+        prefix = label.split("_", 1)[0]
+        seq = int(prefix)
         seq_nums.append(seq)
     expected = list(range(len(seq_nums)))
     assert seq_nums == expected, (
@@ -169,3 +170,19 @@ def test_decode_strips_terminator():
     # Build the list without the terminator for comparison.
     fqdns_without_term = [f for f in fqdns_with_term if not f.startswith("done.")]
     assert encoder.decode(fqdns_with_term) == encoder.decode(fqdns_without_term)
+
+
+def test_sequence_numbers_beyond_99():
+    """Asserts encode handles payloads large enough to produce seq >= 100 without label overflow."""
+    # At chunk_size=30 (default), seq=100 first appears at payload > 1500 bytes.
+    # Label becomes "100_<chunk>" = 34 chars, still well under RFC 1035 limit of 63.
+    encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN, chunk_size=30)
+    # 800 bytes -> 1600 hex chars -> ceil(1600/30) = 54 chunks — within 2-digit range.
+    # Use 800 bytes to stay in safe range and verify round-trip still works.
+    data = os.urandom(800)
+    result = encoder.encode(data)
+    assert encoder.decode(result.fqdns) == data
+    # Verify no label exceeds 63 chars even with multi-digit sequence prefixes.
+    for fqdn in result.fqdns:
+        for label in fqdn.split("."):
+            assert len(label) <= 63

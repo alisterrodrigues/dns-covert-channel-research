@@ -78,8 +78,9 @@ class EvasionSender:
     - Subdomain padding: a fixed number of random lowercase ASCII characters
       are appended to each encoded chunk label before transmission, slightly
       reducing the label's per-character entropy.
-    - These techniques do not affect the encoded payload — the receiver
-      strips padding before decoding.
+    - Subdomain padding is applied to the transmitted label only and is not
+      reversible by the encoder's decode() method. This sender is a
+      one-way transmission research tool.
 
     Args:
         exfil_config: ExfilConfig controlling domain, DNS server, chunk size.

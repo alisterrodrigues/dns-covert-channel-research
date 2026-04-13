@@ -99,11 +99,13 @@ def test_analyze_confidence_high_for_encoded_data():
 
 
 def test_analyze_normal_traffic_not_flagged():
-    """Asserts short, low-entropy labels with low query volume are not flagged."""
+    """Asserts short, low-entropy labels with low volume and irregular timing are not flagged."""
     # 'www' is 3 chars, very low entropy — well below both thresholds.
+    # Irregular timestamps ensure no beacon signal fires alongside the low-entropy labels.
+    timestamps = [0.0, 1.3, 5.7, 8.1, 20.4]
     queries = [
-        DnsQuery(timestamp=float(i), queried_name="www.google.com", src_ip="10.0.0.1")
-        for i in range(5)
+        DnsQuery(timestamp=t, queried_name="www.google.com", src_ip="10.0.0.1")
+        for t in timestamps
     ]
     assert analyze(queries) == []
 

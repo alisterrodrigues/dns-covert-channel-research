@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 LONG_LABEL_THRESHOLD = 20
 
 # Flag if average entropy of subdomain labels exceeds this value.
-HIGH_ENTROPY_THRESHOLD = 3.5
+HIGH_ENTROPY_THRESHOLD = 3.0
 
 # Flag if total query count to a single domain exceeds this in the capture.
 HIGH_VOLUME_THRESHOLD = 20
@@ -126,7 +126,11 @@ def parse_pcap(path: Path) -> list[DnsQuery]:
     for packet in packets:
         if not (packet.haslayer(UDP) and packet.haslayer(DNS)):
             continue
+        if packet[UDP].dport != 53:
+            continue
         dns = packet[DNS]
+        if dns.qr != 0:
+            continue
         if dns.qdcount < 1 or dns.qd is None:
             continue
         try:
@@ -194,11 +198,12 @@ def analyze(queries: list[DnsQuery]) -> list[SuspiciousHost]:
 
     Confidence is graded as follows:
 
-    - ``"high"``   — both average entropy and average label length exceed their
-      respective thresholds, indicating likely encoded data in subdomains.
-    - ``"medium"`` — only one of entropy, label length, or query volume exceeds
-      its threshold.
-    - ``"low"``    — no thresholds exceeded; domain is not included in results.
+    - ``"high"``   — both entropy and label length exceed their thresholds, or
+      either entropy or label length exceeds its threshold together with a
+      positive beaconing signal.
+    - ``"medium"`` — any single signal fires (entropy, label length, query
+      volume, or beaconing) without meeting the "high" criteria above.
+    - ``"low"``    — no signals fired; domain is not included in results.
 
     Domains are included in results when confidence is "high" or "medium", or
     when query volume alone exceeds ``HIGH_VOLUME_THRESHOLD``. Results are
@@ -245,7 +250,8 @@ def analyze(queries: list[DnsQuery]) -> list[SuspiciousHost]:
 
         avg_subdomain_length = statistics.mean(len(lbl) for lbl in labels)
         avg_entropy = statistics.mean(subdomain_entropy(lbl) for lbl in labels)
-        query_interval_std = statistics.stdev(timestamps) if len(timestamps) >= 2 else 0.0
+        intervals = [timestamps[i+1] - timestamps[i] for i in range(len(timestamps) - 1)]
+        query_interval_std = statistics.stdev(intervals) if len(intervals) >= 2 else 0.0
         unique_subdomains = len(set(queried_names))
         query_count = len(domain_queries)
         beacon_result = detect_beaconing(timestamps)
@@ -253,11 +259,14 @@ def analyze(queries: list[DnsQuery]) -> list[SuspiciousHost]:
         entropy_signal = avg_entropy > HIGH_ENTROPY_THRESHOLD
         length_signal = avg_subdomain_length > LONG_LABEL_THRESHOLD
         volume_signal = query_count > HIGH_VOLUME_THRESHOLD
+        beacon_signal = beacon_result.is_beacon
         encoded_signal = entropy_signal and length_signal
 
         if encoded_signal:
             confidence = "high"
-        elif entropy_signal or length_signal or volume_signal:
+        elif (entropy_signal and beacon_signal) or (length_signal and beacon_signal):
+            confidence = "high"
+        elif entropy_signal or length_signal or volume_signal or beacon_signal:
             confidence = "medium"
         else:
             confidence = "low"
