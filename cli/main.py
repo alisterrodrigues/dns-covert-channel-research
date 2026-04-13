@@ -1,5 +1,5 @@
 # CLI entry point.
-# Provides three subcommands: send, detect, benchmark.
+# Provides four subcommands: send, detect, benchmark, receive.
 # Run as: python -m cli.main <subcommand> [args]
 
 from __future__ import annotations
@@ -177,6 +177,42 @@ def _handle_detect(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_receive(args: argparse.Namespace) -> int:
+    """Handle the 'receive' subcommand.
+
+    Starts a passive DNS receiver that listens for encoded subdomain queries
+    and reassembles the payload. Blocks until interrupted with Ctrl+C.
+
+    Args:
+        args: Parsed arguments from the 'receive' subparser.
+
+    Returns:
+        0 on clean exit.
+    """
+    from receiver.dns_receiver import DNSReceiver
+
+    on_complete = None
+    if args.output:
+        output_path = Path(args.output)
+
+        def on_complete(src_ip: str, domain: str, payload: bytes) -> None:
+            """Append a completed session payload to the output file."""
+            header = f"=== Session: {src_ip} -> {domain} ({len(payload)} bytes) ===\n"
+            with output_path.open("a", encoding="utf-8", errors="replace") as fh:
+                fh.write(header)
+                fh.write(payload.decode("utf-8", errors="replace"))
+                fh.write("\n")
+
+    receiver = DNSReceiver(host=args.host, port=args.port, on_complete=on_complete)
+    print("Press Ctrl+C to stop.")
+    try:
+        receiver.start()
+    except KeyboardInterrupt:
+        receiver.stop()
+        print("Receiver stopped.")
+    return 0
+
+
 def _handle_benchmark(args: argparse.Namespace) -> int:
     """Handle the 'benchmark' subcommand.
 
@@ -254,6 +290,15 @@ def _build_parser() -> argparse.ArgumentParser:
     detect_p.add_argument("--threshold-volume", metavar="INT", type=int, default=None,
                           help="Override the query volume detection threshold.")
 
+    # ── receive ───────────────────────────────────────────────────────────
+    recv_p = subparsers.add_parser("receive", help="Listen for encoded DNS queries and reconstruct the payload.")
+    recv_p.add_argument("--host", metavar="TEXT", default="127.0.0.1",
+                        help="IP address to bind the receiver to (default: 127.0.0.1).")
+    recv_p.add_argument("--port", metavar="INT", type=int, default=5353,
+                        help="UDP port to listen on (default: 5353).")
+    recv_p.add_argument("--output", metavar="PATH", default=None,
+                        help="Append each reconstructed payload to this file instead of printing to stdout.")
+
     # ── benchmark ─────────────────────────────────────────────────────────
     bench_p = subparsers.add_parser("benchmark", help="Run detection benchmark against saved PCAP sessions.")
     bench_p.add_argument("--sample-dir", metavar="PATH", default=None,
@@ -278,6 +323,8 @@ def main() -> int:
         return _handle_send(args)
     if args.subcommand == "detect":
         return _handle_detect(args)
+    if args.subcommand == "receive":
+        return _handle_receive(args)
     if args.subcommand == "benchmark":
         return _handle_benchmark(args)
 
