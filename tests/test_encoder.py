@@ -64,9 +64,9 @@ def test_no_label_exceeds_63_chars():
 
 
 def test_chunk_size_validation():
-    """DNSExfilEncoder raises ValueError when chunk_size=61 (exceeds max of 60)."""
+    """DNSExfilEncoder raises ValueError when chunk_size exceeds the DNS label cap."""
     with pytest.raises(ValueError):
-        # 61 exceeds _MAX_CHUNK_SIZE (63 - 3 = 60); must raise.
+        # Exceeds _MAX_CHUNK_SIZE (label prefix + chunk must fit in 63 chars); must raise.
         DNSExfilEncoder(target_domain=_TEST_DOMAIN, chunk_size=61)
 
 
@@ -90,12 +90,14 @@ def test_sequence_numbers_present():
         if fqdn == terminator:
             continue
         label = fqdn.split(".")[0]
-        # Sequence prefix is "NN_" where NN is one or more digits (minimum 2).
-        # At seq >= 100 the prefix grows to 3+ digits — still valid format.
+        # Format: NN_tag_chunk — at least three underscore-separated parts.
         assert "_" in label, f"Label '{label}' missing '_' sequence separator"
-        prefix, _ = label.split("_", 1)
-        assert prefix.isdigit(), f"Sequence prefix '{prefix}' in label '{label}' is not numeric"
+        label_parts = label.split("_", 2)
+        assert len(label_parts) == 3, f"Label '{label}' not in NN_tag_chunk format"
+        prefix, tag, _chunk = label_parts
+        assert prefix.isdigit(), f"Sequence prefix '{prefix}' is not numeric"
         assert len(prefix) >= 2, f"Sequence prefix '{prefix}' shorter than minimum 2 digits"
+        assert tag in ("h", "b32", "b64"), f"Unknown encoding tag '{tag}' in label '{label}'"
 
 
 def test_sequence_numbers_ordered():
@@ -175,7 +177,7 @@ def test_decode_strips_terminator():
 def test_sequence_numbers_beyond_99():
     """encode handles payloads large enough to produce seq >= 100 without label overflow."""
     # At chunk_size=30 (default), seq=100 first appears at payload > 1500 bytes.
-    # Label becomes "100_<chunk>" = 34 chars, still well under RFC 1035 limit of 63.
+    # Label becomes "100_h_<chunk>" (or other tag), still under RFC 1035 limit of 63.
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN, chunk_size=30)
     # 800 bytes -> 1600 hex chars -> ceil(1600/30) = 54 chunks — within 2-digit range.
     # Use 800 bytes to stay in safe range and verify round-trip still works.

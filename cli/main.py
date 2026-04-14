@@ -73,6 +73,7 @@ def _handle_send(args: argparse.Namespace) -> int:
         encoder = DNSExfilEncoder(
             target_domain=config.target_domain,
             chunk_size=config.chunk_size,
+            encoding=config.encoding,
         )
         result = encoder.encode(data)
         for fqdn in result.fqdns:
@@ -212,10 +213,10 @@ def _handle_receive(args: argparse.Namespace) -> int:
         def on_complete(src_ip: str, domain: str, payload: bytes) -> None:
             """Append a completed session payload to the output file."""
             header = f"=== Session: {src_ip} -> {domain} ({len(payload)} bytes) ===\n"
-            with output_path.open("a", encoding="utf-8", errors="replace") as fh:
-                fh.write(header)
-                fh.write(payload.decode("utf-8", errors="replace"))
-                fh.write("\n")
+            with output_path.open("ab") as fh:
+                fh.write(header.encode("utf-8"))
+                fh.write(payload)
+                fh.write(b"\n")
 
     receiver = DNSReceiver(host=args.host, port=args.port, on_complete=on_complete)
     print("Press Ctrl+C to stop.")
@@ -276,7 +277,7 @@ def _build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="python -m cli.main",
-        description="DNS covert channel research toolkit.",
+        description="DNS covert-channel lab tools: emit encoded queries, receive, detect, benchmark.",
     )
     subparsers = parser.add_subparsers(dest="subcommand", metavar="SUBCOMMAND")
     subparsers.required = True
@@ -284,14 +285,23 @@ def _build_parser() -> argparse.ArgumentParser:
     # ── send ──────────────────────────────────────────────────────────────
     send_p = subparsers.add_parser("send", help="Encode and transmit a payload via DNS queries.")
     payload_group = send_p.add_mutually_exclusive_group(required=True)
-    payload_group.add_argument("--payload", metavar="TEXT", help="Plaintext string to exfiltrate.")
-    payload_group.add_argument("--file", metavar="PATH", help="Binary file to exfiltrate.")
+    payload_group.add_argument(
+        "--payload", metavar="TEXT", help="UTF-8 string payload to encode (lab use only)."
+    )
+    payload_group.add_argument(
+        "--file", metavar="PATH", help="Binary file to read as the raw payload (lab use only)."
+    )
     send_p.add_argument("--domain", metavar="TEXT", default="exfil.invalid",
                         help="Target domain for DNS queries (default: exfil.invalid).")
     send_p.add_argument("--server", metavar="TEXT", default="127.0.0.1",
                         help="DNS server IP to send queries to (default: 127.0.0.1).")
-    send_p.add_argument("--chunk-size", metavar="INT", type=int, default=30,
-                        help="Hex chars per subdomain chunk (default: 30).")
+    send_p.add_argument(
+        "--chunk-size",
+        metavar="INT",
+        type=int,
+        default=30,
+        help="Maximum encoded characters per label before splitting (default: 30).",
+    )
     send_p.add_argument("--delay", metavar="FLOAT", type=float, default=0.5,
                         help="Seconds between queries for basic sender (default: 0.5).")
     send_p.add_argument("--evasion", action="store_true",
@@ -344,7 +354,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # ── research ────────────────────────────────────────────────────────
     research_p = subparsers.add_parser(
         "research",
-        help="Synthetic DNS research: threshold sweep or encoding × jitter matrix.",
+        help="Synthetic sessions: threshold sweep or encoding × jitter detection matrix.",
     )
     research_mode = research_p.add_mutually_exclusive_group(required=True)
     research_mode.add_argument(

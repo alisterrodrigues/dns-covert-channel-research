@@ -1,5 +1,4 @@
-# Exfiltration configuration.
-# All values read from here — nothing hardcoded in sender or encoder.
+# Exfiltration configuration shared by the sender and encoder.
 
 from dataclasses import dataclass
 
@@ -13,11 +12,11 @@ class ExfilConfig:
     # but still generates full PCAP traffic — correct default for lab capture.
     dns_server: str = "127.0.0.1"
 
-    # Max characters per subdomain chunk. Must be <= 60 to leave room for
-    # the 2-digit sequence prefix (e.g., "00_") and stay under DNS 63-char label limit.
+    # Max characters of encoded payload per label. Capped by the encoder so
+    # the full wire label (sequence + encoding tag + chunk) fits in 63 octets.
     chunk_size: int = 30
 
-    # Seconds between successive DNS queries. Simulates attacker pacing.
+    # Seconds between successive DNS queries in the basic sender.
     inter_query_delay_seconds: float = 0.5
 
     # UDP source port for crafted DNS packets.

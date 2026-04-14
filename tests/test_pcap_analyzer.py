@@ -21,13 +21,12 @@ from detection.pcap_analyzer import (
 
 logger = logging.getLogger(__name__)
 
-# 27-char hex-prefixed label: exceeds both the length threshold (20) and the
-# entropy threshold (3.5 bits) — sufficient to produce confidence="high".
-_HIGH_ENTROPY_LABEL = "00_deadbeef1234567890abcdef"
+# High-entropy chunk label (NN_tag_chunk wire format): exceeds both the length
+# threshold (20) and the entropy threshold — sufficient for confidence="high".
+_HIGH_ENTROPY_LABEL = "00_h_deadbeef1234567890abcdef"
 
-# 16-char pure hex label: exceeds the entropy threshold but not the length
-# threshold — produces confidence="medium" (one signal, not both).
-_MEDIUM_ENTROPY_LABEL = "cafe0123456789ab"
+# Medium case: exceeds entropy threshold but not length — confidence="medium".
+_MEDIUM_ENTROPY_LABEL = "00_h_cafe0123456789ab"
 
 
 def _make_queries(label: str, domain: str, count: int, interval: float = 0.5) -> list[DnsQuery]:
@@ -46,8 +45,8 @@ def _make_queries(label: str, domain: str, count: int, interval: float = 0.5) ->
 
 def test_extract_subdomain_label_basic():
     """Leftmost label is returned after stripping the base domain."""
-    result = extract_subdomain_label("00_68656c6c6f.exfil.invalid", "exfil.invalid")
-    assert result == "00_68656c6c6f"
+    result = extract_subdomain_label("00_h_68656c6c6f.exfil.invalid", "exfil.invalid")
+    assert result == "00_h_68656c6c6f"
 
 
 def test_extract_subdomain_label_no_subdomain():
@@ -58,8 +57,8 @@ def test_extract_subdomain_label_no_subdomain():
 
 def test_extract_subdomain_label_strips_trailing_dots():
     """Trailing dots on either argument do not affect the result."""
-    result = extract_subdomain_label("00_abc.exfil.invalid.", "exfil.invalid.")
-    assert result == "00_abc"
+    result = extract_subdomain_label("00_h_abc.exfil.invalid.", "exfil.invalid.")
+    assert result == "00_h_abc"
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +182,7 @@ _ZEEK_LOG_CONTENT = (
     "#separator \\x09\n"
     "#fields\tts\tuid\tid.orig_h\tid.orig_p\tid.resp_h\tid.resp_p\tproto\ttrans_id\trtt\tquery\n"
     "1700000000.0\tCxyz1\t192.168.1.10\t54321\t8.8.8.8\t53\tudp\t1234\t0.001\texfil.invalid\n"
-    "1700000001.0\tCxyz2\t192.168.1.10\t54322\t8.8.8.8\t53\tudp\t1235\t0.001\t00_abc.exfil.invalid\n"
+    "1700000001.0\tCxyz2\t192.168.1.10\t54322\t8.8.8.8\t53\tudp\t1235\t0.001\t00_h_abc.exfil.invalid\n"
     "1700000002.0\tCxyz3\t192.168.1.11\t54323\t8.8.8.8\t53\tudp\t1236\t0.001\tdone.exfil.invalid\n"
 )
 

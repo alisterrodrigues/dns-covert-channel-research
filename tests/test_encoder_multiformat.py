@@ -64,7 +64,7 @@ def test_base32_labels_dns_safe():
         if fqdn == terminator:
             continue
         label = fqdn.split(".")[0]
-        chunk = label.split("_", 1)[1]
+        chunk = label.split("_", 2)[2]
         # base32 alphabet: a-z and 2-7; sequence prefix digits are also valid
         assert re.fullmatch(r"[a-z2-7]+", chunk), f"Unsafe chars in base32 label chunk: {chunk!r}"
 
@@ -78,7 +78,7 @@ def test_base64_labels_dns_safe():
         if fqdn == terminator:
             continue
         label = fqdn.split(".")[0]
-        chunk = label.split("_", 1)[1]
+        chunk = label.split("_", 2)[2]
         # urlsafe_b64 alphabet: A-Z, a-z, 0-9, -, _ (case preserved; base64 is case-sensitive)
         assert re.fullmatch(r"[A-Za-z0-9\-_]+", chunk), f"Unsafe chars in base64 label chunk: {chunk!r}"
 
@@ -112,14 +112,14 @@ def test_base32_entropy_higher_than_hex_on_english():
 
     hex_result = hex_encoder.encode(data)
     hex_first_label = next(
-        f.split(".")[0].split("_", 1)[1]
+        f.split(".")[0].split("_", 2)[2]
         for f in hex_result.fqdns
         if f != terminator
     )
 
     b32_result = b32_encoder.encode(data)
     b32_first_label = next(
-        f.split(".")[0].split("_", 1)[1]
+        f.split(".")[0].split("_", 2)[2]
         for f in b32_result.fqdns
         if f != terminator
     )

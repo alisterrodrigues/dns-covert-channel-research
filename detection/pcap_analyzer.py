@@ -30,7 +30,7 @@ class DnsQuery:
 
     Attributes:
         timestamp: Unix timestamp of the query.
-        queried_name: The full FQDN queried (e.g. '00_68656c6c6f.exfil.invalid').
+        queried_name: The full FQDN queried (e.g. ``00_h_68656c6c6f.exfil.invalid``).
         src_ip: Source IP address of the query.
     """
 
@@ -72,8 +72,8 @@ def extract_subdomain_label(queried_name: str, base_domain: str) -> str:
 
     For example::
 
-        extract_subdomain_label("00_68656c6c6f.exfil.invalid", "exfil.invalid")
-        # returns "00_68656c6c6f"
+        extract_subdomain_label("00_h_68656c6c6f.exfil.invalid", "exfil.invalid")
+        # returns "00_h_68656c6c6f"
 
     If queried_name equals base_domain exactly (no subdomain), returns "".
     Trailing dots are stripped from both arguments before comparison.

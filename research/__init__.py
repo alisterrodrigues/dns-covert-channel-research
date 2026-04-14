@@ -1,1 +1,1 @@
-# Synthetic DNS sessions and detection benchmarks for research.
+# Synthetic DNS sessions and detector benchmark helpers.

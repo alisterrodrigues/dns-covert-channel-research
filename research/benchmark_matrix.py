@@ -10,7 +10,7 @@ from detection.pcap_analyzer import SuspiciousHost, analyze
 
 from research.session_generator import SessionSpec, generate_session
 
-_MATRIX_PAYLOAD = b"sensitive credential data: api_key=abc123secret " * 20
+_MATRIX_PAYLOAD = b"synthetic_benchmark_payload_row_" * 20
 _JITTER_LEVELS = (0.0, 0.3, 0.8)
 _ENCODINGS = ("hex", "base32", "base64")
 
