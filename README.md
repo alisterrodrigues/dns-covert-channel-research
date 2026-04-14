@@ -64,27 +64,27 @@ python -m cli.main detect --pcap sample_data/exfil_session.pcap --format html --
 
 **Dry-run output — three encodings side by side:**
 
-![Dry-run CLI output showing hex, base32, base64 FQDNs](screenshots/dry_run_encodings.png)
+![Dry-run CLI output showing hex, base32, base64 FQDNs](docs/screenshots/dry_run_encodings.png)
 
 **Detector output — basic exfil session:**
 
-![CLI detect output showing high confidence alert with four signals](screenshots/detect_basic.png)
+![CLI detect output showing high confidence alert with four signals](docs/screenshots/detect_basic.png)
 
 **Detector output — evasion session (beacon signal absent):**
 
-![CLI detect output showing high confidence but no beacon signal](screenshots/detect_evasion.png)
+![CLI detect output showing high confidence but no beacon signal](docs/screenshots/detect_evasion.png)
 
 **Wireshark — encoded subdomain labels in PCAP:**
 
-![Wireshark showing DNS queries with long hex-encoded subdomains](screenshots/wireshark_basic.png)
+![Wireshark showing DNS queries with long hex-encoded subdomains](docs/screenshots/wireshark_basic.png)
 
 **HTML detection report:**
 
-![Browser showing the self-contained HTML report with domain cards](screenshots/html_report.png)
+![Browser showing the self-contained HTML report with domain cards](docs/screenshots/html_report.png)
 
 **Benchmark output:**
 
-![Terminal showing benchmark comparison of basic vs evasion session](screenshots/benchmark.png)
+![Terminal showing benchmark comparison of basic vs evasion session](docs/screenshots/benchmark.png)
 
 ## Benchmark results
 
@@ -95,7 +95,7 @@ Detection run against real PCAP captures taken on a Kali Linux VM:
 | basic   | 67      | high       | 3.16        | 33.0          | high   |
 | evasion | 67      | high       | 3.50        | 37.0          | low    |
 
-The evasion variant defeats beacon detection (CV rises from 0.02 to 0.48 with randomised delays) but remains detectable via entropy and label length. The `beaconing detected` signal is absent from the evasion session output — the timing evasion worked. See `docs/detection_limits.md`.
+The evasion variant defeats beacon detection (CV rises from 0.02 to 0.48 with randomised delays) but remains detectable via entropy and label length. The `beaconing detected` signal is absent from the evasion session output. See `docs/detection_limits.md`.
 
 ## Detection matrix
 
@@ -121,22 +121,18 @@ Each DNS query label: `NN_tag_chunk.target-domain`
 
 Example: `00_h_68656c6c6f.exfil.invalid`
 
-The receiver reads the tag from each label, strips evasion padding using the encoding's own character set, and decodes accordingly. No out-of-band signalling required.
+The receiver reads the tag from each label, strips evasion padding using the encoding's own character set, and decodes accordingly.
 
 ## Detection signals
 
 | Signal | Threshold | What it catches |
 |--------|-----------|-----------------|
 | Label length | avg > 20 chars | All encoding schemes — encoded labels average 30–37 chars |
-| Shannon entropy | avg > 3.0 bits | base32 (4.27), base64 (4.44); hex-of-English at ~3.15 is close |
+| Shannon entropy | avg > 3.0 bits | base32 (4.27), base64 (4.44); hex-of-English at ~3.15 |
 | Query volume | > 20 queries/domain | Sessions with payloads above ~285 bytes |
 | Beaconing CV | < 0.15 high / < 0.30 medium | Fixed-interval automated senders |
 
-Confidence grading: `high` when entropy + length both fire, or when either fires alongside beacon. `medium` for any single signal. Per-source-IP tracking is included — sessions from multiple hosts to the same domain are flagged in signals.
-
-## Grouping bypass — fixed
-
-Earlier implementations grouped queries by stripping the first label only (`parts[1:]`). An attacker could prepend throwaway labels to scatter queries across different grouping keys and defeat aggregation. The current implementation anchors grouping to the **last two labels** of the FQDN, so any number of prepended labels still resolves to the same base domain.
+Confidence grading: `high` when entropy + length both fire, or when either fires alongside beacon. `medium` for any single signal. Per-source-IP tracking is included — sessions from multiple hosts to the same domain are noted in signals.
 
 ## CLI reference
 
