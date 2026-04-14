@@ -23,6 +23,10 @@ HIGH_ENTROPY_THRESHOLD = 3.0
 # Flag if total query count to a single domain exceeds this in the capture.
 HIGH_VOLUME_THRESHOLD = 20
 
+# Minimum number of labels in an FQDN to be considered a valid subdomain query.
+# Queries with fewer labels (e.g. single-label names) are skipped.
+_MIN_FQDN_LABELS = 3
+
 
 @dataclass
 class DnsQuery:
@@ -48,9 +52,10 @@ class SuspiciousHost:
         query_count: Total number of DNS queries to subdomains of this domain.
         avg_subdomain_length: Mean length of queried subdomain labels.
         avg_entropy: Mean Shannon entropy of queried subdomain labels.
-        query_interval_std: Standard deviation of inter-query times in seconds.
+        query_interval_std: Standard deviation of inter-query intervals in seconds.
             0.0 if fewer than 2 queries.
         unique_subdomains: Count of distinct queried subdomains.
+        unique_src_ips: Set of source IPs that queried this domain.
         confidence: 'high', 'medium', or 'low'.
         beacon_result: BeaconResult from timing analysis.
         signals: List of human-readable strings describing why this was flagged.
@@ -62,9 +67,34 @@ class SuspiciousHost:
     avg_entropy: float
     query_interval_std: float
     unique_subdomains: int
+    unique_src_ips: list[str]
     confidence: str
     beacon_result: BeaconResult
     signals: list[str] = field(default_factory=list)
+
+
+def _base_domain(queried_name: str) -> str:
+    """Extract the base domain from a queried FQDN.
+
+    Uses the last two labels as the base domain (e.g. ``exfil.invalid``),
+    which prevents the extra-label prepending bypass where an attacker
+    prepends throwaway labels to scatter queries across artificial grouping keys.
+
+    For FQDNs with only two labels (no subdomain), returns the FQDN itself.
+    Single-label names return an empty string and are excluded upstream.
+
+    Args:
+        queried_name: Full FQDN from a DNS query.
+
+    Returns:
+        The last two dot-separated labels, or "" for single-label names.
+    """
+    parts = queried_name.rstrip(".").split(".")
+    if len(parts) < 2:
+        return ""
+    # Always anchor to the last two labels — attacker-prepended labels
+    # do not affect the grouping key.
+    return ".".join(parts[-2:])
 
 
 def extract_subdomain_label(queried_name: str, base_domain: str) -> str:
@@ -100,11 +130,11 @@ def extract_subdomain_label(queried_name: str, base_domain: str) -> str:
 
 
 def parse_pcap(path: Path) -> list[DnsQuery]:
-    """Parse a PCAP file and extract DNS A-record queries.
+    """Parse a PCAP file and extract DNS query records.
 
     Uses Scapy's rdpcap to load packets. Filters to UDP port 53 packets
-    that carry a DNS layer with at least one question record (qdcount >= 1).
-    The queried name is taken from the first question record.
+    that carry a DNS layer with at least one question record (qdcount >= 1)
+    and a QR bit of 0 (queries only, not responses).
 
     Args:
         path: Path to a .pcap file.
@@ -192,9 +222,13 @@ def parse_zeek_dns_log(path: Path) -> list[DnsQuery]:
 def analyze(queries: list[DnsQuery]) -> list[SuspiciousHost]:
     """Analyse a list of DNS queries and return domains flagged as suspicious.
 
-    Queries are grouped by base domain (everything after the first label). For
-    each domain with at least 2 queries, aggregate statistics are computed and
-    detection thresholds applied.
+    Queries are grouped by the last two labels of the queried FQDN (the
+    effective base domain). This prevents the extra-label prepending bypass
+    where an attacker prefixes throwaway labels to scatter queries across
+    multiple artificial grouping keys.
+
+    For each domain with at least 2 queries, aggregate statistics are computed
+    and detection thresholds applied.
 
     Confidence is graded as follows:
 
@@ -218,13 +252,10 @@ def analyze(queries: list[DnsQuery]) -> list[SuspiciousHost]:
     if not queries:
         return []
 
-    # Group by base domain (everything after the first label).
+    # Group by base domain anchored to the last two labels.
     groups: dict[str, list[DnsQuery]] = {}
     for q in queries:
-        parts = q.queried_name.split(".")
-        if len(parts) < 2:
-            continue
-        base = ".".join(parts[1:])
+        base = _base_domain(q.queried_name)
         if not base:
             continue
         groups.setdefault(base, []).append(q)
@@ -237,6 +268,7 @@ def analyze(queries: list[DnsQuery]) -> list[SuspiciousHost]:
 
         queried_names = [q.queried_name for q in domain_queries]
         timestamps = sorted(q.timestamp for q in domain_queries)
+        src_ips = sorted(set(q.src_ip for q in domain_queries))
 
         # Collect subdomain labels, skipping the terminator and empty labels.
         labels = [
@@ -250,7 +282,7 @@ def analyze(queries: list[DnsQuery]) -> list[SuspiciousHost]:
 
         avg_subdomain_length = statistics.mean(len(lbl) for lbl in labels)
         avg_entropy = statistics.mean(subdomain_entropy(lbl) for lbl in labels)
-        intervals = [timestamps[i+1] - timestamps[i] for i in range(len(timestamps) - 1)]
+        intervals = [timestamps[i + 1] - timestamps[i] for i in range(len(timestamps) - 1)]
         query_interval_std = statistics.stdev(intervals) if len(intervals) >= 2 else 0.0
         unique_subdomains = len(set(queried_names))
         query_count = len(domain_queries)
@@ -292,6 +324,10 @@ def analyze(queries: list[DnsQuery]) -> list[SuspiciousHost]:
                 f"beaconing detected: interval {beacon_result.estimated_interval_seconds:.2f}s,"
                 f" confidence {beacon_result.confidence}"
             )
+        if len(src_ips) > 1:
+            signals.append(
+                f"multiple source IPs: {', '.join(src_ips)}"
+            )
 
         results.append(
             SuspiciousHost(
@@ -301,6 +337,7 @@ def analyze(queries: list[DnsQuery]) -> list[SuspiciousHost]:
                 avg_entropy=avg_entropy,
                 query_interval_std=query_interval_std,
                 unique_subdomains=unique_subdomains,
+                unique_src_ips=src_ips,
                 confidence=confidence,
                 beacon_result=beacon_result,
                 signals=signals,

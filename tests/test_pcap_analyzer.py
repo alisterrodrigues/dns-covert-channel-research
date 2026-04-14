@@ -145,7 +145,6 @@ def test_analyze_sorted_by_entropy_descending():
 def test_analyze_skips_done_label():
     """'done' terminator labels do not inflate entropy or length statistics."""
     data_queries = _make_queries(_HIGH_ENTROPY_LABEL, "exfil.invalid", count=10)
-    # Add a terminator query — should be excluded from stats.
     done_query = DnsQuery(
         timestamp=5.0, queried_name="done.exfil.invalid", src_ip="10.0.0.1"
     )
@@ -174,10 +173,57 @@ def test_analyze_beacon_result_attached():
 
 
 # ---------------------------------------------------------------------------
+# analyze — per-source-IP tracking
+# ---------------------------------------------------------------------------
+
+
+def test_analyze_unique_src_ips_single_source():
+    """unique_src_ips contains exactly the one source IP when all queries share it."""
+    queries = _make_queries(_HIGH_ENTROPY_LABEL, "exfil.invalid", count=10)
+    results = analyze(queries)
+    match = next(r for r in results if r.domain == "exfil.invalid")
+    assert match.unique_src_ips == ["10.0.0.1"]
+
+
+def test_analyze_unique_src_ips_multiple_sources():
+    """unique_src_ips lists all distinct source IPs when queries come from multiple hosts."""
+    fqdn = f"{_HIGH_ENTROPY_LABEL}.exfil.invalid"
+    queries = [
+        DnsQuery(timestamp=float(i) * 0.5, queried_name=fqdn,
+                 src_ip="10.0.0.1" if i % 2 == 0 else "10.0.0.2")
+        for i in range(10)
+    ]
+    results = analyze(queries)
+    match = next(r for r in results if r.domain == "exfil.invalid")
+    assert set(match.unique_src_ips) == {"10.0.0.1", "10.0.0.2"}
+
+
+# ---------------------------------------------------------------------------
+# analyze — extra-label prepending bypass prevention
+# ---------------------------------------------------------------------------
+
+
+def test_analyze_extra_label_prepending_does_not_bypass_grouping():
+    """Queries with attacker-prepended throwaway labels still group under the base domain."""
+    # An attacker prepends 'x1.' and 'x2.' to scatter queries — all should still
+    # aggregate under exfil.invalid because grouping uses the last two labels.
+    fqdn_a = f"x1.{_HIGH_ENTROPY_LABEL}.exfil.invalid"
+    fqdn_b = f"x2.{_HIGH_ENTROPY_LABEL}.exfil.invalid"
+    queries = [
+        DnsQuery(timestamp=float(i) * 0.5,
+                 queried_name=fqdn_a if i % 2 == 0 else fqdn_b,
+                 src_ip="10.0.0.1")
+        for i in range(10)
+    ]
+    results = analyze(queries)
+    domains = [r.domain for r in results]
+    assert "exfil.invalid" in domains
+
+
+# ---------------------------------------------------------------------------
 # parse_zeek_dns_log
 # ---------------------------------------------------------------------------
 
-# Minimal Zeek dns.log header and data rows.
 _ZEEK_LOG_CONTENT = (
     "#separator \\x09\n"
     "#fields\tts\tuid\tid.orig_h\tid.orig_p\tid.resp_h\tid.resp_p\tproto\ttrans_id\trtt\tquery\n"
@@ -203,7 +249,6 @@ def test_parse_zeek_dns_log_skips_comments(tmp_path):
     log_file = tmp_path / "dns.log"
     log_file.write_text(_ZEEK_LOG_CONTENT)
     results = parse_zeek_dns_log(log_file)
-    # The content has 2 comment lines; neither should appear as a query.
     for r in results:
         assert not r.queried_name.startswith("#")
 
