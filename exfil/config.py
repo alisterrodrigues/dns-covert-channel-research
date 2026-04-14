@@ -8,9 +8,13 @@ class ExfilConfig:
     # Domain queries are sent to: chunk.target_domain
     target_domain: str = "exfil.invalid"
 
-    # DNS server to send queries to. 127.0.0.1 causes queries to fail silently
-    # but still generates full PCAP traffic — correct default for lab capture.
+    # DNS server IP to send queries to.
     dns_server: str = "127.0.0.1"
+
+    # UDP destination port for DNS queries. Set to 5353 when targeting the
+    # built-in receiver (python -m cli.main receive). Use 53 for real DNS
+    # infrastructure or loopback captures via tcpdump.
+    dns_server_port: int = 53
 
     # Max characters of encoded payload per label. Capped by the encoder so
     # the full wire label (sequence + encoding tag + chunk) fits in 63 octets.

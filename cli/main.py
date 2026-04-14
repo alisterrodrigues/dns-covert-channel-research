@@ -51,7 +51,6 @@ def _handle_send(args: argparse.Namespace) -> int:
     Returns:
         0 on success, 1 on error.
     """
-    # Resolve payload bytes.
     if args.file:
         file_path = Path(args.file)
         if not file_path.exists():
@@ -64,6 +63,7 @@ def _handle_send(args: argparse.Namespace) -> int:
     config = ExfilConfig(
         target_domain=args.domain,
         dns_server=args.server,
+        dns_server_port=args.server_port,
         chunk_size=args.chunk_size,
         inter_query_delay_seconds=args.delay,
         encoding=args.encoding,
@@ -148,7 +148,6 @@ def _handle_detect(args: argparse.Namespace) -> int:
     """
     import detection.pcap_analyzer as _analyzer
 
-    # Apply any threshold overrides before running the analyzer.
     if args.threshold_entropy is not None:
         _analyzer.HIGH_ENTROPY_THRESHOLD = args.threshold_entropy
     if args.threshold_length is not None:
@@ -219,6 +218,9 @@ def _handle_receive(args: argparse.Namespace) -> int:
                 fh.write(b"\n")
 
     receiver = DNSReceiver(host=args.host, port=args.port, on_complete=on_complete)
+    print(f"[*] Receiver listening on {args.host}:{args.port}")
+    print(f"    Send queries with: sudo python -m cli.main send --payload TEXT "
+          f"--server {args.host} --server-port {args.port} --domain DOMAIN")
     print("Press Ctrl+C to stop.")
     try:
         receiver.start()
@@ -296,6 +298,18 @@ def _build_parser() -> argparse.ArgumentParser:
     send_p.add_argument("--server", metavar="TEXT", default="127.0.0.1",
                         help="DNS server IP to send queries to (default: 127.0.0.1).")
     send_p.add_argument(
+        "--server-port",
+        metavar="INT",
+        type=int,
+        default=53,
+        dest="server_port",
+        help=(
+            "UDP destination port for DNS queries (default: 53). "
+            "Set to 5353 to target the built-in receiver "
+            "(python -m cli.main receive)."
+        ),
+    )
+    send_p.add_argument(
         "--chunk-size",
         metavar="INT",
         type=int,
@@ -314,7 +328,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Padding chars for evasion sender (default: 4).")
     send_p.add_argument("--encoding", metavar="TEXT", default="hex",
                         choices=["hex", "base32", "base64"],
-                        help="Encoding scheme for the payload: hex, base32, or base64 (default: hex).")
+                        help="Encoding scheme: hex, base32, or base64 (default: hex).")
     send_p.add_argument("--dry-run", action="store_true",
                         help="Print FQDNs that would be sent without transmitting any packets.")
 
