@@ -1,6 +1,6 @@
 # Detection Limits and Known Evasion Surface
 
-This document describes what the detector reliably catches, what it misses, and what is genuinely out of scope for a research tool versus a production SOC deployment. Gaps that could be closed with code changes have been addressed; what remains here represents either fundamental limitations of the technique or production-scale requirements that are outside the scope of this project.
+This document describes what the detector reliably catches, what it misses, and what is genuinely out of scope for a research tool versus a production SOC deployment. Gaps that could be closed with targeted code changes have been addressed; what remains here represents either fundamental trade-offs in the heuristic design or production-scale requirements outside the scope of this project.
 
 ## What the Detector Catches Reliably
 
@@ -14,15 +14,24 @@ This document describes what the detector reliably catches, what it misses, and 
 
 **Sessions from multiple source IPs.** The analyzer tracks all distinct source IPs per domain group and includes them in the signals list when more than one is found.
 
-**Extra-label prepending attacks.** Fixed. The grouping algorithm anchors to the last two labels of each FQDN. An attacker prepending throwaway labels (`x1.00_h_data.exfil.invalid`, `x2.00_h_data.exfil.invalid`) still aggregates under `exfil.invalid` — the bypass no longer works.
+## Domain Grouping Heuristic
+
+The analyzer groups queries by the last two or three labels of each FQDN, depending on depth:
+
+- FQDNs with fewer than 4 labels → last 2 labels (e.g. `sub.exfil.invalid` → `exfil.invalid`)
+- FQDNs with 4 or more labels → last 3 labels (e.g. `sub.exfil.example.com` → `exfil.example.com`)
+
+This prevents the straightforward extra-label prepending bypass where an attacker prefixes throwaway labels (`x1.00_h_data.exfil.invalid`) to scatter queries across different grouping keys. The bypass no longer works for flat two-label exfil domains.
+
+The heuristic has a known limitation: for deeply nested FQDNs or non-standard TLD structures, the 2/3-label anchor may not match the actual registrable domain boundary. A production deployment would use a Public Suffix List lookup for accurate eTLD+1 grouping.
 
 ## What Evades the Current Detector
 
-**Slow, low-volume exfiltration.** A payload of 284 bytes or fewer encodes to 19 data chunks plus one terminator — exactly 20 total queries, at the threshold but not above it. Splitting a credential dump across multiple slow, small sessions defeats both volume detection and beaconing detection simultaneously. The volume threshold is a configurable parameter (`--threshold-volume`) but any fixed threshold has this property.
+**Slow, low-volume exfiltration.** A payload of 284 bytes or fewer encodes to 19 data chunks plus one terminator — exactly 20 total queries, at the threshold but not above it. Splitting a credential dump across multiple slow sessions defeats both volume and beacon detection simultaneously.
 
-**Timing randomisation.** The evasion variant raises CV from 0.02 to approximately 0.48 by drawing inter-query delays from a uniform 0.5–3.0 second distribution. This exceeds the 0.30 cutoff and removes the beacon signal from the output entirely. The session is still detected via entropy and label length, but a pure timing-only detector would miss it.
+**Timing randomisation.** The evasion variant raises CV from 0.02 to approximately 0.48 by drawing inter-query delays from a uniform 0.5–3.0 second distribution. The beacon signal is removed from the output entirely. The session is still detected via entropy and label length.
 
-**Hex encoding of highly repetitive data.** Hex-encoded English text produces entropy around 3.15 bits — only 0.15 bits above the 3.0 threshold. A payload consisting of highly repetitive data (repeated keys, padding bytes, null sequences) could push the entropy score below the threshold. Applying compression before encoding would lower entropy further.
+**Hex encoding of highly repetitive data.** Hex-encoded English text produces entropy around 3.15 bits — only 0.15 bits above the 3.0 threshold. Applying compression before encoding would lower entropy further.
 
 ## Encoding Comparison
 
@@ -34,18 +43,18 @@ Results from `python -m cli.main research --matrix` against a fixed 960-byte pay
 | base32   | 4.27        | Yes      | high           | low            |
 | base64   | 4.44        | Yes      | high           | low            |
 
-The entropy margin is widest for base64 (1.44 bits above threshold) and narrowest for hex (0.14 bits). At high timing jitter, all three remain detected at high confidence because label length and volume signals persist regardless of timing.
+The entropy margin is widest for base64 (1.44 bits above threshold) and narrowest for hex (0.14 bits).
 
 ## What a Production Deployment Would Add
 
-These are not gaps in this project's design — they are production-scale requirements that belong in a different class of tooling:
+**Public Suffix List for grouping.** Replace the last-2/3-label heuristic with an eTLD+1 lookup using a PSL library. This correctly handles multi-label TLDs (`.co.uk`, `.com.au`) and avoids over-aggregating under the wrong boundary.
 
-**NXDOMAIN ratio tracking.** The current parser filters to DNS queries only. Tracking the ratio of NXDOMAIN responses to queries for the same domain provides an additional signal — exfiltration to a non-resolving domain produces 100% NXDOMAIN, unusual for legitimate traffic. Requires response packet parsing.
+**NXDOMAIN ratio tracking.** Tracking the ratio of NXDOMAIN responses to queries provides an additional signal — exfiltration to a non-resolving domain produces 100% NXDOMAIN, unusual for legitimate traffic. Requires response packet parsing.
 
-**Domain age and passive DNS context.** A newly registered domain queried only from internal hosts is more suspicious than an established CDN domain with similar label patterns. Requires integration with a passive DNS feed or WHOIS enrichment service.
+**Domain age and passive DNS context.** A newly registered domain queried only from internal hosts is more suspicious than an established CDN domain with similar label patterns.
 
-**Allowlist/baseline profiles.** CDN and telemetry domains use long, high-entropy labels for legitimate reasons (cache-busting, signed URLs, tracking tokens). A baseline profile built from observed normal traffic would reduce false positives on production networks significantly. Requires a training data collection phase.
+**Allowlist/baseline profiles.** CDN and telemetry domains use long, high-entropy labels for legitimate reasons. A baseline profile built from observed normal traffic would reduce false positives significantly.
 
 **Zeek Intelligence Framework integration.** The Zeek script fires a notice but does not cross-reference against known bad infrastructure. Wiring the `$identifier` field into Zeek's Intel framework would allow automated IOC correlation.
 
-**ML-based label character modelling.** A character frequency or n-gram model trained on a benign DNS corpus would catch encodings that fall below the entropy threshold but still differ statistically from human-readable labels. Requires a labelled training dataset and introduces a dependency on a modelling framework.
+**ML-based label character modelling.** A character frequency or n-gram model trained on a benign DNS corpus would catch encodings that fall below the entropy threshold but still differ statistically from human-readable labels.

