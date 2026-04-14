@@ -23,10 +23,6 @@ HIGH_ENTROPY_THRESHOLD = 3.0
 # Flag if total query count to a single domain exceeds this in the capture.
 HIGH_VOLUME_THRESHOLD = 20
 
-# Minimum number of labels in an FQDN to be considered a valid subdomain query.
-# Queries with fewer labels (e.g. single-label names) are skipped.
-_MIN_FQDN_LABELS = 3
-
 
 @dataclass
 class DnsQuery:
@@ -55,7 +51,7 @@ class SuspiciousHost:
         query_interval_std: Standard deviation of inter-query intervals in seconds.
             0.0 if fewer than 2 queries.
         unique_subdomains: Count of distinct queried subdomains.
-        unique_src_ips: Set of source IPs that queried this domain.
+        unique_src_ips: List of source IPs that queried this domain.
         confidence: 'high', 'medium', or 'low'.
         beacon_result: BeaconResult from timing analysis.
         signals: List of human-readable strings describing why this was flagged.
@@ -74,27 +70,28 @@ class SuspiciousHost:
 
 
 def _base_domain(queried_name: str) -> str:
-    """Extract the base domain from a queried FQDN.
+    """Extract the grouping base domain from a queried FQDN.
 
-    Uses the last two labels as the base domain (e.g. ``exfil.invalid``),
-    which prevents the extra-label prepending bypass where an attacker
-    prepends throwaway labels to scatter queries across artificial grouping keys.
+    Uses the last three labels for FQDNs with four or more parts, and the
+    last two labels for shorter FQDNs. This handles both simple two-label
+    domains (``exfil.invalid``) and three-label owned suffixes
+    (``exfil.example.com``) without over-aggregating traffic under a bare
+    registrable domain.
 
-    For FQDNs with only two labels (no subdomain), returns the FQDN itself.
-    Single-label names return an empty string and are excluded upstream.
+    Prepending throwaway labels such as ``x1.00_h_data.exfil.invalid`` still
+    resolves to ``exfil.invalid`` as the grouping key.
 
     Args:
         queried_name: Full FQDN from a DNS query.
 
     Returns:
-        The last two dot-separated labels, or "" for single-label names.
+        The last two or three dot-separated labels, or "" for single-label names.
     """
     parts = queried_name.rstrip(".").split(".")
     if len(parts) < 2:
         return ""
-    # Always anchor to the last two labels — attacker-prepended labels
-    # do not affect the grouping key.
-    return ".".join(parts[-2:])
+    anchor = 3 if len(parts) >= 4 else 2
+    return ".".join(parts[-anchor:])
 
 
 def extract_subdomain_label(queried_name: str, base_domain: str) -> str:
@@ -143,7 +140,6 @@ def parse_pcap(path: Path) -> list[DnsQuery]:
         List of DnsQuery objects, one per DNS question found.
         Returns an empty list if the file does not exist or cannot be parsed.
     """
-    # Scapy is imported here to avoid import-time side effects in test environments.
     from scapy.all import DNS, IP, UDP, rdpcap  # noqa: PLC0415
 
     try:
@@ -222,10 +218,10 @@ def parse_zeek_dns_log(path: Path) -> list[DnsQuery]:
 def analyze(queries: list[DnsQuery]) -> list[SuspiciousHost]:
     """Analyse a list of DNS queries and return domains flagged as suspicious.
 
-    Queries are grouped by the last two labels of the queried FQDN (the
-    effective base domain). This prevents the extra-label prepending bypass
-    where an attacker prefixes throwaway labels to scatter queries across
-    multiple artificial grouping keys.
+    Queries are grouped by base domain using ``_base_domain()``, which anchors
+    to the last two or three labels depending on FQDN depth. This prevents
+    the extra-label prepending bypass where an attacker prefixes throwaway
+    labels to scatter queries across multiple grouping keys.
 
     For each domain with at least 2 queries, aggregate statistics are computed
     and detection thresholds applied.
@@ -252,7 +248,6 @@ def analyze(queries: list[DnsQuery]) -> list[SuspiciousHost]:
     if not queries:
         return []
 
-    # Group by base domain anchored to the last two labels.
     groups: dict[str, list[DnsQuery]] = {}
     for q in queries:
         base = _base_domain(q.queried_name)
@@ -270,7 +265,6 @@ def analyze(queries: list[DnsQuery]) -> list[SuspiciousHost]:
         timestamps = sorted(q.timestamp for q in domain_queries)
         src_ips = sorted(set(q.src_ip for q in domain_queries))
 
-        # Collect subdomain labels, skipping the terminator and empty labels.
         labels = [
             extract_subdomain_label(q.queried_name, domain)
             for q in domain_queries
