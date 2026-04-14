@@ -3,7 +3,7 @@
     {
       "session_name": "basic",
       "pcap_path": "/Users/alisterrodrigues/dns-covert-channel-research/sample_data/exfil_session.pcap",
-      "queries_detected": 47,
+      "queries_detected": 67,
       "suspicious_domains": 1,
       "top_domain": "exfil.invalid",
       "top_confidence": "high",
@@ -21,7 +21,7 @@
     {
       "session_name": "evasion",
       "pcap_path": "/Users/alisterrodrigues/dns-covert-channel-research/sample_data/evasion_session.pcap",
-      "queries_detected": 47,
+      "queries_detected": 67,
       "suspicious_domains": 1,
       "top_domain": "exfil.invalid",
       "top_confidence": "high",
