@@ -204,11 +204,16 @@ def test_analyze_unique_src_ips_multiple_sources():
 
 
 def test_analyze_extra_label_prepending_does_not_bypass_grouping():
-    """Queries with attacker-prepended throwaway labels still group under the base domain."""
-    # An attacker prepends 'x1.' and 'x2.' to scatter queries — all should still
-    # aggregate under exfil.invalid because grouping uses the last two labels.
-    fqdn_a = f"x1.{_HIGH_ENTROPY_LABEL}.exfil.invalid"
-    fqdn_b = f"x2.{_HIGH_ENTROPY_LABEL}.exfil.invalid"
+    """Prepended throwaway labels do not scatter queries across different grouping keys.
+
+    Uses a 3-label base domain (exfil.example.com) with one prepended label,
+    producing 5-part FQDNs. _base_domain() takes the last 3 labels, so all
+    queries group under exfil.example.com regardless of the varying prefix.
+    """
+    # 5-part FQDN: x1.00_h_deadbeef.exfil.example.com
+    # last 3 labels = exfil.example.com → all group together
+    fqdn_a = f"x1.{_HIGH_ENTROPY_LABEL}.exfil.example.com"
+    fqdn_b = f"x2.{_HIGH_ENTROPY_LABEL}.exfil.example.com"
     queries = [
         DnsQuery(timestamp=float(i) * 0.5,
                  queried_name=fqdn_a if i % 2 == 0 else fqdn_b,
@@ -217,7 +222,7 @@ def test_analyze_extra_label_prepending_does_not_bypass_grouping():
     ]
     results = analyze(queries)
     domains = [r.domain for r in results]
-    assert "exfil.invalid" in domains
+    assert "exfil.example.com" in domains
 
 
 # ---------------------------------------------------------------------------
