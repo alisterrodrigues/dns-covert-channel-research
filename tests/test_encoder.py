@@ -19,7 +19,7 @@ _TEST_DOMAIN = "exfil.invalid"
 
 
 def test_encode_returns_fqdns():
-    """Asserts encode(b'hello') returns a list of strings, last starting with 'done.'."""
+    """encode(b'hello') returns a list of strings, last starting with 'done.'."""
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
     result = encoder.encode(b"hello")
     assert isinstance(result.fqdns, list)
@@ -28,7 +28,7 @@ def test_encode_returns_fqdns():
 
 
 def test_encode_empty():
-    """Asserts encode(b'') returns EncodeResult with empty fqdns list and chunk_count=0."""
+    """encode(b'') returns EncodeResult with empty fqdns list and chunk_count=0."""
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
     result = encoder.encode(b"")
     assert isinstance(result, EncodeResult)
@@ -37,7 +37,7 @@ def test_encode_empty():
 
 
 def test_encode_includes_terminator():
-    """Asserts the last FQDN in a non-empty encode result is 'done.{target_domain}'."""
+    """The last FQDN in a non-empty encode result is the done terminator."""
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
     result = encoder.encode(b"any data")
     assert result.fqdns[-1] == f"done.{_TEST_DOMAIN}"
@@ -49,7 +49,7 @@ def test_encode_includes_terminator():
 
 
 def test_no_label_exceeds_63_chars():
-    """Asserts every label in every FQDN from 10-, 100-, and 1000-byte inputs is <= 63 chars."""
+    """Every label in every FQDN from 10-, 100-, and 1000-byte inputs stays within 63 characters."""
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
     # DNS RFC 1035 hard limit per label is 63 characters.
     dns_label_max = 63
@@ -64,14 +64,14 @@ def test_no_label_exceeds_63_chars():
 
 
 def test_chunk_size_validation():
-    """Asserts DNSExfilEncoder raises ValueError when chunk_size=61 (exceeds max of 60)."""
+    """DNSExfilEncoder raises ValueError when chunk_size=61 (exceeds max of 60)."""
     with pytest.raises(ValueError):
         # 61 exceeds _MAX_CHUNK_SIZE (63 - 3 = 60); must raise.
         DNSExfilEncoder(target_domain=_TEST_DOMAIN, chunk_size=61)
 
 
 def test_chunk_size_minimum():
-    """Asserts DNSExfilEncoder raises ValueError when chunk_size=0 (below minimum of 1)."""
+    """DNSExfilEncoder raises ValueError when chunk_size=0 (below minimum of 1)."""
     with pytest.raises(ValueError):
         DNSExfilEncoder(target_domain=_TEST_DOMAIN, chunk_size=0)
 
@@ -82,7 +82,7 @@ def test_chunk_size_minimum():
 
 
 def test_sequence_numbers_present():
-    """Asserts every non-terminator FQDN label starts with a two-digit number followed by '_'."""
+    """Every non-terminator FQDN label starts with a two-digit sequence prefix and '_'."""
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
     result = encoder.encode(b"hello world")
     terminator = f"done.{_TEST_DOMAIN}"
@@ -99,7 +99,7 @@ def test_sequence_numbers_present():
 
 
 def test_sequence_numbers_ordered():
-    """Asserts sequence numbers increase by 1 from 00 through N-1 with no gaps."""
+    """Sequence numbers increase by 1 from 00 through N-1 with no gaps."""
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
     result = encoder.encode(b"hello world")
     terminator = f"done.{_TEST_DOMAIN}"
@@ -123,28 +123,28 @@ def test_sequence_numbers_ordered():
 
 
 def test_roundtrip_10_bytes():
-    """Asserts decode(encode(data).fqdns) == data for 10 random bytes."""
+    """decode(encode(data).fqdns) == data for 10 random bytes."""
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
     data = os.urandom(10)
     assert encoder.decode(encoder.encode(data).fqdns) == data
 
 
 def test_roundtrip_100_bytes():
-    """Asserts decode(encode(data).fqdns) == data for 100 random bytes."""
+    """decode(encode(data).fqdns) == data for 100 random bytes."""
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
     data = os.urandom(100)
     assert encoder.decode(encoder.encode(data).fqdns) == data
 
 
 def test_roundtrip_1000_bytes():
-    """Asserts decode(encode(data).fqdns) == data for 1000 random bytes."""
+    """decode(encode(data).fqdns) == data for 1000 random bytes."""
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
     data = os.urandom(1000)
     assert encoder.decode(encoder.encode(data).fqdns) == data
 
 
 def test_roundtrip_exact_text():
-    """Asserts encode then decode of b'secret exfil data' round-trips exactly."""
+    """Round-trip: encode then decode of b'secret exfil data' preserves bytes."""
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
     data = b"secret exfil data"
     assert encoder.decode(encoder.encode(data).fqdns) == data
@@ -156,13 +156,13 @@ def test_roundtrip_exact_text():
 
 
 def test_decode_empty_list():
-    """Asserts decode([]) returns b''."""
+    """decode([]) returns b''."""
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
     assert encoder.decode([]) == b""
 
 
 def test_decode_strips_terminator():
-    """Asserts decode result is identical whether or not the terminator FQDN is included."""
+    """Decode output matches whether or not the terminator FQDN is present."""
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN)
     data = b"strip terminator test"
     result = encoder.encode(data)
@@ -173,7 +173,7 @@ def test_decode_strips_terminator():
 
 
 def test_sequence_numbers_beyond_99():
-    """Asserts encode handles payloads large enough to produce seq >= 100 without label overflow."""
+    """encode handles payloads large enough to produce seq >= 100 without label overflow."""
     # At chunk_size=30 (default), seq=100 first appears at payload > 1500 bytes.
     # Label becomes "100_<chunk>" = 34 chars, still well under RFC 1035 limit of 63.
     encoder = DNSExfilEncoder(target_domain=_TEST_DOMAIN, chunk_size=30)

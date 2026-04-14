@@ -60,6 +60,7 @@ def _handle_send(args: argparse.Namespace) -> int:
         dns_server=args.server,
         chunk_size=args.chunk_size,
         inter_query_delay_seconds=args.delay,
+        encoding=args.encoding,
     )
 
     if args.dry_run:
@@ -270,6 +271,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Max delay for evasion sender (default: 3.0).")
     send_p.add_argument("--padding", metavar="INT", type=int, default=4,
                         help="Padding chars for evasion sender (default: 4).")
+    send_p.add_argument("--encoding", metavar="TEXT", default="hex",
+                        choices=["hex", "base32", "base64"],
+                        help="Encoding scheme for the payload: hex, base32, or base64 (default: hex).")
     send_p.add_argument("--dry-run", action="store_true",
                         help="Print FQDNs that would be sent without transmitting any packets.")
 

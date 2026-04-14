@@ -45,19 +45,19 @@ def _make_queries(label: str, domain: str, count: int, interval: float = 0.5) ->
 
 
 def test_extract_subdomain_label_basic():
-    """Asserts the leftmost label is returned after stripping the base domain."""
+    """Leftmost label is returned after stripping the base domain."""
     result = extract_subdomain_label("00_68656c6c6f.exfil.invalid", "exfil.invalid")
     assert result == "00_68656c6c6f"
 
 
 def test_extract_subdomain_label_no_subdomain():
-    """Asserts an empty string is returned when the FQDN equals the base domain."""
+    """Empty string when the FQDN equals the base domain."""
     result = extract_subdomain_label("exfil.invalid", "exfil.invalid")
     assert result == ""
 
 
 def test_extract_subdomain_label_strips_trailing_dots():
-    """Asserts trailing dots on either argument do not affect the result."""
+    """Trailing dots on either argument do not affect the result."""
     result = extract_subdomain_label("00_abc.exfil.invalid.", "exfil.invalid.")
     assert result == "00_abc"
 
@@ -68,7 +68,7 @@ def test_extract_subdomain_label_strips_trailing_dots():
 
 
 def test_analyze_empty_returns_empty():
-    """Asserts analyze([]) returns an empty list."""
+    """analyze([]) returns an empty list."""
     assert analyze([]) == []
 
 
@@ -78,7 +78,7 @@ def test_analyze_empty_returns_empty():
 
 
 def test_analyze_flags_high_entropy_domain():
-    """Asserts a domain with high-entropy, long subdomain labels appears in results."""
+    """High-entropy, long subdomain labels produce a flagged domain in results."""
     queries = _make_queries(_HIGH_ENTROPY_LABEL, "exfil.invalid", count=10)
     results = analyze(queries)
     domains = [r.domain for r in results]
@@ -86,7 +86,7 @@ def test_analyze_flags_high_entropy_domain():
 
 
 def test_analyze_confidence_high_for_encoded_data():
-    """Asserts confidence='high' when both entropy and length thresholds are exceeded."""
+    """confidence='high' when both entropy and length thresholds are exceeded."""
     queries = _make_queries(_HIGH_ENTROPY_LABEL, "exfil.invalid", count=10)
     results = analyze(queries)
     match = next(r for r in results if r.domain == "exfil.invalid")
@@ -99,7 +99,7 @@ def test_analyze_confidence_high_for_encoded_data():
 
 
 def test_analyze_normal_traffic_not_flagged():
-    """Asserts short, low-entropy labels with low volume and irregular timing are not flagged."""
+    """Short, low-entropy labels with low volume and irregular timing are not flagged."""
     # 'www' is 3 chars, very low entropy — well below both thresholds.
     # Irregular timestamps ensure no beacon signal fires alongside the low-entropy labels.
     timestamps = [0.0, 1.3, 5.7, 8.1, 20.4]
@@ -116,7 +116,7 @@ def test_analyze_normal_traffic_not_flagged():
 
 
 def test_analyze_signals_populated():
-    """Asserts the signals list is non-empty for a flagged domain."""
+    """Signals list is non-empty for a flagged domain."""
     queries = _make_queries(_HIGH_ENTROPY_LABEL, "exfil.invalid", count=10)
     results = analyze(queries)
     match = next(r for r in results if r.domain == "exfil.invalid")
@@ -129,7 +129,7 @@ def test_analyze_signals_populated():
 
 
 def test_analyze_sorted_by_entropy_descending():
-    """Asserts results are sorted by avg_entropy from highest to lowest."""
+    """Results are sorted by avg_entropy from highest to lowest."""
     high_queries = _make_queries(_HIGH_ENTROPY_LABEL, "exfil.invalid", count=10)
     medium_queries = _make_queries(_MEDIUM_ENTROPY_LABEL, "suspicious.net", count=5)
     results = analyze(high_queries + medium_queries)
@@ -144,7 +144,7 @@ def test_analyze_sorted_by_entropy_descending():
 
 
 def test_analyze_skips_done_label():
-    """Asserts 'done' terminator labels do not inflate entropy or length statistics."""
+    """'done' terminator labels do not inflate entropy or length statistics."""
     data_queries = _make_queries(_HIGH_ENTROPY_LABEL, "exfil.invalid", count=10)
     # Add a terminator query — should be excluded from stats.
     done_query = DnsQuery(
@@ -167,7 +167,7 @@ def test_analyze_skips_done_label():
 
 
 def test_analyze_beacon_result_attached():
-    """Asserts beacon_result on a flagged SuspiciousHost is a BeaconResult instance."""
+    """beacon_result on a flagged SuspiciousHost is a BeaconResult instance."""
     queries = _make_queries(_HIGH_ENTROPY_LABEL, "exfil.invalid", count=10)
     results = analyze(queries)
     match = next(r for r in results if r.domain == "exfil.invalid")
@@ -189,7 +189,7 @@ _ZEEK_LOG_CONTENT = (
 
 
 def test_parse_zeek_dns_log_basic(tmp_path):
-    """Asserts parse_zeek_dns_log returns the correct number of DnsQuery objects."""
+    """parse_zeek_dns_log returns one DnsQuery per valid data row."""
     log_file = tmp_path / "dns.log"
     log_file.write_text(_ZEEK_LOG_CONTENT)
     results = parse_zeek_dns_log(log_file)
@@ -200,7 +200,7 @@ def test_parse_zeek_dns_log_basic(tmp_path):
 
 
 def test_parse_zeek_dns_log_skips_comments(tmp_path):
-    """Asserts comment lines starting with '#' are not parsed into DnsQuery objects."""
+    """Comment lines starting with '#' are not parsed into DnsQuery objects."""
     log_file = tmp_path / "dns.log"
     log_file.write_text(_ZEEK_LOG_CONTENT)
     results = parse_zeek_dns_log(log_file)
@@ -210,7 +210,7 @@ def test_parse_zeek_dns_log_skips_comments(tmp_path):
 
 
 def test_parse_zeek_dns_log_skips_null_queries(tmp_path):
-    """Asserts rows with '-' in the query column are excluded from results."""
+    """Rows with '-' in the query column are excluded from results."""
     content = (
         "#fields\tts\tuid\tid.orig_h\tid.orig_p\tid.resp_h\tid.resp_p\tproto\ttrans_id\trtt\tquery\n"
         "1700000000.0\tC1\t10.0.0.1\t1\t8.8.8.8\t53\tudp\t1\t0.001\t-\n"
@@ -224,7 +224,7 @@ def test_parse_zeek_dns_log_skips_null_queries(tmp_path):
 
 
 def test_parse_zeek_dns_log_missing_file():
-    """Asserts parse_zeek_dns_log returns [] without raising for a non-existent path."""
+    """parse_zeek_dns_log returns [] without raising for a non-existent path."""
     result = parse_zeek_dns_log(Path("/nonexistent/path/dns.log"))
     assert result == []
 
@@ -235,6 +235,6 @@ def test_parse_zeek_dns_log_missing_file():
 
 
 def test_run_invalid_type_raises():
-    """Asserts run() raises ValueError for an unrecognised input_type."""
+    """run() raises ValueError for an unrecognised input_type."""
     with pytest.raises(ValueError):
         run(Path("anything"), input_type="invalid")

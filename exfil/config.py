@@ -22,3 +22,7 @@ class ExfilConfig:
 
     # UDP source port for crafted DNS packets.
     src_port: int = 12345
+
+    # Encoding scheme applied to payload bytes before chunking.
+    # Supported values: "hex", "base32", "base64".
+    encoding: str = "hex"
