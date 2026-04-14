@@ -7,21 +7,52 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from detection.pcap_analyzer import (
     HIGH_ENTROPY_THRESHOLD,
     LONG_LABEL_THRESHOLD,
+    DnsQuery,
     SuspiciousHost,
+    analyze,
     parse_pcap,
-    run as analyzer_run,
 )
+from research.session_generator import generate_benign_session
 
 logger = logging.getLogger(__name__)
 
 _RULE = "━" * 49
+
+# PCAPs under ``sample_data/`` use this suffix for encoded exfil queries.
+_BENCHMARK_EXFIL_DOMAIN = "exfil.invalid"
+
+
+def _remap_benign_timestamps(benign: list[DnsQuery], ts_min: float, ts_max: float) -> list[DnsQuery]:
+    """Spread benign synthetic queries across the PCAP time window."""
+    raw_ts = [q.timestamp for q in benign]
+    r_min, r_max = min(raw_ts), max(raw_ts)
+    r_span = max(r_max - r_min, 1e-9)
+    span = max(ts_max - ts_min, 1e-9)
+    remapped: list[DnsQuery] = []
+    for q in benign:
+        rel = (q.timestamp - r_min) / r_span
+        new_ts = ts_min + rel * span
+        remapped.append(DnsQuery(timestamp=new_ts, queried_name=q.queried_name, src_ip=q.src_ip))
+    return remapped
+
+
+def _queries_with_benign_mix(pcap_queries: list[DnsQuery]) -> list[DnsQuery]:
+    """Interleave synthetic benign DNS traffic into the same timeline as ``pcap_queries``."""
+    if not pcap_queries:
+        return pcap_queries
+    ts_min = min(q.timestamp for q in pcap_queries)
+    ts_max = max(q.timestamp for q in pcap_queries)
+    benign = generate_benign_session()
+    benign_adj = _remap_benign_timestamps(benign, ts_min, ts_max)
+    combined = list(pcap_queries) + benign_adj
+    combined.sort(key=lambda q: q.timestamp)
+    return combined
 
 
 @dataclass
@@ -38,7 +69,7 @@ class SessionResult:
         top_avg_entropy: avg_entropy of the top domain, or None.
         top_avg_label_length: avg_subdomain_length of the top domain, or None.
         top_beacon_confidence: beacon confidence of the top domain, or None.
-        detected: True if at least one domain was flagged.
+        detected: True if ``exfil.invalid`` from the mixed capture was flagged.
         signals: List of signal strings from the top domain.
     """
 
@@ -55,32 +86,38 @@ class SessionResult:
     signals: list[str]
 
 
-def _analyze_pcap(session_name: str, pcap_path: Path) -> SessionResult:
+def _analyze_pcap(session_name: str, pcap_path: Path, *, mix_benign: bool = True) -> SessionResult:
     """Analyze a single PCAP file and return a SessionResult.
 
     Args:
         session_name: Label used to identify this session in the report.
         pcap_path: Path to the PCAP file.
+        mix_benign: When True, merge synthetic benign queries into the PCAP timeline
+            before analysis so the detector sees mixed traffic.
 
     Returns:
         SessionResult populated from the analyzer output.
     """
-    all_queries = parse_pcap(pcap_path)
-    suspicious: list[SuspiciousHost] = analyzer_run(pcap_path, input_type="pcap")
+    pcap_queries = parse_pcap(pcap_path)
+    queries_for_analysis = (
+        _queries_with_benign_mix(pcap_queries) if mix_benign and pcap_queries else pcap_queries
+    )
+    suspicious: list[SuspiciousHost] = analyze(queries_for_analysis)
 
-    top = suspicious[0] if suspicious else None
+    exfil_host = next((h for h in suspicious if h.domain == _BENCHMARK_EXFIL_DOMAIN), None)
+    top = exfil_host
 
     return SessionResult(
         session_name=session_name,
         pcap_path=str(pcap_path),
-        queries_detected=len(all_queries),
+        queries_detected=len(queries_for_analysis),
         suspicious_domains=len(suspicious),
         top_domain=top.domain if top else None,
         top_confidence=top.confidence if top else None,
         top_avg_entropy=top.avg_entropy if top else None,
         top_avg_label_length=top.avg_subdomain_length if top else None,
         top_beacon_confidence=top.beacon_result.confidence if top else None,
-        detected=bool(suspicious),
+        detected=top is not None,
         signals=top.signals if top else [],
     )
 
@@ -89,7 +126,10 @@ def run_benchmark(sample_data_dir: Path) -> dict:
     """Run detection analysis against basic and evasion PCAP sessions.
 
     Loads ``exfil_session.pcap`` and ``evasion_session.pcap`` from
-    ``sample_data_dir`` and runs the pcap_analyzer against each.
+    ``sample_data_dir``, mixes synthetic benign DNS queries into each capture's
+    timeline, and runs ``analyze()`` on the combined query list. Detection is
+    reported for ``exfil.invalid`` specifically so benign false positives do not
+    count as exfil hits.
 
     Args:
         sample_data_dir: Path to the directory containing the PCAP files.

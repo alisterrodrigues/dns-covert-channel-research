@@ -1,0 +1,74 @@
+[
+  {
+    "encoding": "hex",
+    "jitter": 0.0,
+    "detected": true,
+    "confidence": "high",
+    "avg_entropy": 3.1390264892656874,
+    "beacon_confidence": "high"
+  },
+  {
+    "encoding": "hex",
+    "jitter": 0.3,
+    "detected": true,
+    "confidence": "high",
+    "avg_entropy": 3.1390264892656874,
+    "beacon_confidence": "medium"
+  },
+  {
+    "encoding": "hex",
+    "jitter": 0.8,
+    "detected": true,
+    "confidence": "high",
+    "avg_entropy": 3.1390264892656874,
+    "beacon_confidence": "low"
+  },
+  {
+    "encoding": "base32",
+    "jitter": 0.0,
+    "detected": true,
+    "confidence": "high",
+    "avg_entropy": 4.27119959678605,
+    "beacon_confidence": "high"
+  },
+  {
+    "encoding": "base32",
+    "jitter": 0.3,
+    "detected": true,
+    "confidence": "high",
+    "avg_entropy": 4.27119959678605,
+    "beacon_confidence": "medium"
+  },
+  {
+    "encoding": "base32",
+    "jitter": 0.8,
+    "detected": true,
+    "confidence": "high",
+    "avg_entropy": 4.27119959678605,
+    "beacon_confidence": "low"
+  },
+  {
+    "encoding": "base64",
+    "jitter": 0.0,
+    "detected": true,
+    "confidence": "high",
+    "avg_entropy": 4.439161741159412,
+    "beacon_confidence": "high"
+  },
+  {
+    "encoding": "base64",
+    "jitter": 0.3,
+    "detected": true,
+    "confidence": "high",
+    "avg_entropy": 4.439161741159412,
+    "beacon_confidence": "medium"
+  },
+  {
+    "encoding": "base64",
+    "jitter": 0.8,
+    "detected": true,
+    "confidence": "high",
+    "avg_entropy": 4.439161741159412,
+    "beacon_confidence": "low"
+  }
+]

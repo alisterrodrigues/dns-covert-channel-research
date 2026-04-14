@@ -1,5 +1,5 @@
 # CLI entry point.
-# Provides four subcommands: send, detect, benchmark, receive.
+# Provides subcommands: send, detect, benchmark, receive, research.
 # Run as: python -m cli.main <subcommand> [args]
 
 from __future__ import annotations
@@ -12,6 +12,14 @@ import sys
 from pathlib import Path
 
 from analysis.benchmark import print_report, run_benchmark
+from research.benchmark_matrix import print_matrix_report, run_matrix
+from research.threshold_sweep import (
+    default_entropy_grid,
+    default_length_grid,
+    default_sweep_sessions,
+    print_sweep_table,
+    run_sweep,
+)
 from detection.pcap_analyzer import (
     HIGH_ENTROPY_THRESHOLD,
     HIGH_VOLUME_THRESHOLD,
@@ -22,9 +30,7 @@ from detection.pcap_analyzer import (
     run as analyzer_run,
 )
 from exfil.config import ExfilConfig
-from exfil.dns_sender import DNSSender
 from exfil.encoder import DNSExfilEncoder
-from evasion.evasion_sender import EvasionConfig, EvasionSender
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +83,8 @@ def _handle_send(args: argparse.Namespace) -> int:
     print("WARNING: raw packet sending requires root. Run with sudo if send fails.")
 
     if args.evasion:
+        from evasion.evasion_sender import EvasionConfig, EvasionSender
+
         ev_config = EvasionConfig(
             min_delay=args.min_delay,
             max_delay=args.max_delay,
@@ -89,6 +97,8 @@ def _handle_send(args: argparse.Namespace) -> int:
         print(f"total_queries:    {result.total_queries}")
         print(f"elapsed_seconds:  {result.elapsed_seconds:.3f}")
     else:
+        from exfil.dns_sender import DNSSender
+
         sender = DNSSender(config)
         result = sender.exfiltrate(data)
         print(f"chunks_sent:      {result.chunks_sent}")
@@ -217,6 +227,24 @@ def _handle_receive(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_research(args: argparse.Namespace) -> int:
+    """Run synthetic threshold sweep or encoding × jitter matrix."""
+    if args.sweep:
+        malicious, benign = default_sweep_sessions()
+        results = run_sweep(default_entropy_grid(), default_length_grid(), malicious, benign)
+        print_sweep_table(results)
+        payload = [dataclasses.asdict(r) for r in results]
+    else:
+        results = run_matrix()
+        print_matrix_report(results)
+        payload = [dataclasses.asdict(r) for r in results]
+
+    if args.output:
+        Path(args.output).write_text(json.dumps(payload, indent=2))
+        print(f"\nJSON written to {args.output}")
+    return 0
+
+
 def _handle_benchmark(args: argparse.Namespace) -> int:
     """Handle the 'benchmark' subcommand.
 
@@ -313,6 +341,29 @@ def _build_parser() -> argparse.ArgumentParser:
     bench_p.add_argument("--json", action="store_true",
                          help="Print raw JSON instead of the formatted report.")
 
+    # ── research ────────────────────────────────────────────────────────
+    research_p = subparsers.add_parser(
+        "research",
+        help="Synthetic DNS research: threshold sweep or encoding × jitter matrix.",
+    )
+    research_mode = research_p.add_mutually_exclusive_group(required=True)
+    research_mode.add_argument(
+        "--sweep",
+        action="store_true",
+        help="Run entropy × label-length threshold sweep and print the results table.",
+    )
+    research_mode.add_argument(
+        "--matrix",
+        action="store_true",
+        help="Run encoding × jitter detection matrix and print the results table.",
+    )
+    research_p.add_argument(
+        "--output",
+        metavar="PATH",
+        default=None,
+        help="Write JSON results (sweep or matrix rows) to this file.",
+    )
+
     return parser
 
 
@@ -334,6 +385,8 @@ def main() -> int:
         return _handle_receive(args)
     if args.subcommand == "benchmark":
         return _handle_benchmark(args)
+    if args.subcommand == "research":
+        return _handle_research(args)
 
     parser.print_help()
     return 1
