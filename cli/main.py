@@ -165,7 +165,10 @@ def _handle_detect(args: argparse.Namespace) -> int:
     if args.format == "json":
         output = json.dumps([dataclasses.asdict(h) for h in results], indent=2)
     elif args.format == "html":
-        print("HTML output is not supported. Use --format text or json.")
+        from detection.reporter import generate_report
+        output_path = Path(args.output) if args.output else Path("detection_report.html")
+        generate_report(results, input_path, output_path)
+        print(f"HTML report written to {output_path}")
         return 0
     else:
         output = _format_text(results)
