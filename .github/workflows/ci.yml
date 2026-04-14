@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+      - name: Verify CLI entry point
+        run: |
+          python -m cli.main send --payload "ci_test" --dry-run
+          python -m cli.main send --payload "ci_test" --dry-run --encoding base32
+          python -m cli.main send --payload "ci_test" --dry-run --encoding base64
+
+      - name: Verify research module
+        run: python -m research.benchmark_matrix
+
+      - name: Verify encoder round-trips
+        run: |
+          python -c "
+          from exfil.encoder import DNSExfilEncoder
+          data = b'ci round-trip test payload'
+          for enc in ('hex', 'base32', 'base64'):
+              e = DNSExfilEncoder('exfil.invalid', encoding=enc)
+              assert e.decode(e.encode(data).fqdns) == data, f'{enc} round-trip failed'
+          print('All encoding round-trips passed.')
+          "
