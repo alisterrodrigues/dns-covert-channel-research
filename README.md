@@ -75,27 +75,27 @@ sudo python -m cli.main send --payload "secret" \
 
 **Dry-run output — three encodings side by side:**
 
-![Dry-run CLI output showing hex, base32, base64 FQDNs](screenshots/dry_run_encodings.png)
+![Dry-run CLI output showing hex, base32, base64 FQDNs](docs/screenshots/dry_run_encodings.png)
 
 **Detector output — basic exfil session:**
 
-![CLI detect output showing high confidence alert with four signals](screenshots/detect_basic.png)
+![CLI detect output showing high confidence alert with four signals](docs/screenshots/detect_basic.png)
 
 **Detector output — evasion session (beacon signal absent):**
 
-![CLI detect output showing high confidence but no beacon signal](screenshots/detect_evasion.png)
+![CLI detect output showing high confidence but no beacon signal](docs/screenshots/detect_evasion.png)
 
 **Wireshark — encoded subdomain labels in PCAP:**
 
-![Wireshark showing DNS queries with long hex-encoded subdomains](screenshots/wireshark_basic.png)
+![Wireshark showing DNS queries with long hex-encoded subdomains](docs/screenshots/wireshark_basic.png)
 
 **HTML detection report:**
 
-![Browser showing the self-contained HTML report with domain cards](screenshots/html_report.png)
+![Browser showing the self-contained HTML report with domain cards](docs/screenshots/html_report.png)
 
 **Benchmark output:**
 
-![Terminal showing benchmark comparison of basic vs evasion session](screenshots/benchmark.png)
+![Terminal showing benchmark comparison of basic vs evasion session](docs/screenshots/benchmark.png)
 
 ## Benchmark results
 
